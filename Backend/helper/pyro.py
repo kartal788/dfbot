@@ -143,11 +143,21 @@ async def restart_notification():
 
 # Bot commands
 commands = [
-    BotCommand("start", "🚀 Start the bot"),
-    BotCommand("set", "🎬 Manually add IMDb metadata"),
-    BotCommand("fixmetadata", "⚙️ Fix empty fields of Metadata"),
-    BotCommand("log", "📄 Send the log file"),
-    BotCommand("restart", "♻️ Restart the bot"),
+BotCommand("start", "🚀 Botu başlat."),
+BotCommand("istatistik", "📊 Bot istatistiklerini görüntüle."),
+BotCommand("cevir", "🇹🇷 Açıklamaları Türkçeye çevir."),
+BotCommand("tur", "⭐ Türleri Türkçeye çevir."),
+BotCommand("restart", "♻️ Botu yeniden başlat."),
+BotCommand("set", "🎬 IMDb meta verilerini elle ekleyin."),
+BotCommand("vindir", "💾 Veritabanını indir."),
+BotCommand("m3uindir", "📂 M3U dosyasını indir."),
+BotCommand("log", "📄 Günlük dosyasını gönder."),
+BotCommand("fixmetadata", "⚙️ Meta veri boş alanlarını düzelt."),
+BotCommand("sil", "🗑️ Bütün filmleri ve dizileri sil."),
+BotCommand("dizisil", "📺 Dizi silme (sezon ve bölüm destekli)."),
+BotCommand("dizisiltest", "📝 Dizi silme test modu."),
+BotCommand("filmsil", "🎬 Film silme."),
+BotCommand("filmsiltest", "📝 Film silme test modu.")    
 ]
 
 
