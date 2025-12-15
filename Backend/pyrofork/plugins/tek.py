@@ -1,22 +1,26 @@
-from pyrogram import Client, filters
-from pyrogram.types import Message
-from Backend.helper.custom_filter import CustomFilters
 import os
 import asyncio
-import PTN
-from Backend.logger import LOGGER
+from time import time
+from pyrogram import Client, filters
+from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
-from Backend.helper.metadata.py import metadata  # metadata fonksiyonun bulunduğu modül
+from themoviedb import aioTMDb
+import PTN
+from datetime import datetime
+from Backend.helper.encrypt import encode_string
+from Backend.helper.custom_filter import CustomFilters
 
 # ----------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
-
-if len(db_urls) < 2:
-    raise Exception("İkinci DATABASE bulunamadı!")
-
-MONGO_URL = db_urls[1]  # ikinci database
+if len(db_urls) < 1:
+    raise Exception("DATABASE bulunamadı!")
+MONGO_URL = db_urls[0]  # İlk database kullanılıyor
 DB_NAME = "dbFyvio"
+
+TMDB_API = os.getenv("TMDB_API", "")
+if not TMDB_API:
+    raise Exception("TMDB_API bulunamadı!")
 
 # ----------------- Mongo Async -----------------
 client = AsyncIOMotorClient(MONGO_URL)
@@ -30,20 +34,22 @@ async def init_db():
     movie_col = db["movie"]
     series_col = db["tv"]
 
-# ----------------- Onay Bekleyen ve Flood -----------------
+# ----------------- TMDb -----------------
+tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
+API_SEMAPHORE = asyncio.Semaphore(12)
+
+# ----------------- Onay Bekleyen -----------------
 awaiting_confirmation = {}
-flood_wait = 30
-last_command_time = {}
 
 # ----------------- /ekle Komutu -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_file(client: Client, message: Message):
     await init_db()
     if len(message.command) < 3:
-        await message.reply_text("Kullanım: /ekle <ID> <DosyaAdı>")
+        await message.reply_text("Kullanım: /ekle <URL> <DosyaAdı>")
         return
 
-    file_id = message.command[1]  # artık URL yerine ID
+    url = message.command[1]
     filename = " ".join(message.command[2:])
 
     try:
@@ -62,35 +68,74 @@ async def add_file(client: Client, message: Message):
         await message.reply_text("Başlık bulunamadı, lütfen doğru bir dosya adı girin.")
         return
 
-    meta = await metadata(filename, message.chat.id, message.id)
-    if not meta:
-        await message.reply_text(f"{title} için metadata bulunamadı.")
+    # Encode string
+    data = {"chat_id": message.chat.id, "msg_id": message.id}
+    try:
+        encoded_string = await encode_string(data)
+    except Exception:
+        encoded_string = None
+
+    # TMDb arama
+    async with API_SEMAPHORE:
+        if season and episode:
+            search_result = await tmdb.search().tv(query=title)
+        else:
+            search_result = await tmdb.search().movies(query=title, year=year)
+
+    if not search_result:
+        await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
         return
 
-    record = {
-        "title": meta.get("title", title),
-        "season": season,
-        "episode": episode,
-        "year": meta.get("year", year),
-        "quality": quality,
-        "id": file_id,
-        "tmdb_id": meta.get("tmdb_id"),
-        "imdb_id": meta.get("imdb_id"),
-        "description": meta.get("description", ""),
-        "poster": meta.get("poster", ""),
-        "backdrop": meta.get("backdrop", ""),
-        "logo": meta.get("logo", ""),
-        "genres": meta.get("genres", []),
-        "media_type": meta.get("media_type"),
-        "cast": meta.get("cast", []),
-        "runtime": meta.get("runtime", ""),
-        "episode_title": meta.get("episode_title", ""),
-        "episode_backdrop": meta.get("episode_backdrop", ""),
-        "episode_overview": meta.get("episode_overview", ""),
-        "episode_released": meta.get("episode_released", ""),
-    }
+    metadata = search_result[0]
 
-    collection = series_col if season else movie_col
+    # TMDb detay çekme
+    if season:
+        details = await tmdb.tv(metadata.id).details()
+        cast = [c.name for c in details.cast[:5]] if hasattr(details, "cast") else []
+        genres = [g.name for g in details.genres] if hasattr(details, "genres") else []
+        record = {
+            "tmdb_id": metadata.id,
+            "imdb_id": getattr(metadata, "imdb_id", ""),
+            "db_index": 1,
+            "title": title,
+            "genres": genres,
+            "description": getattr(metadata, "overview", ""),
+            "rating": getattr(metadata, "vote_average", 0),
+            "release_year": int(getattr(metadata, "first_air_date", "0").split("-")[0]) if getattr(metadata, "first_air_date", None) else None,
+            "poster": f"https://image.tmdb.org/t/p/w500{getattr(metadata, 'poster_path', '')}",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{getattr(metadata, 'backdrop_path', '')}",
+            "logo": f"https://image.tmdb.org/t/p/w300{getattr(metadata, 'logo', '')}",
+            "cast": cast,
+            "runtime": f"{getattr(details, 'episode_run_time', ['?'])[0]} min",
+            "media_type": "tv",
+            "updated_on": str(datetime.utcnow()),
+            "seasons": [{"season_number": season, "episodes": [{"episode_number": episode, "title": filename, "overview": getattr(metadata, 'overview', ''), "telegram": [{"quality": quality, "id": url, "name": filename, "size": "UNKNOWN"}]}]}],
+        }
+        collection = series_col
+    else:
+        details = await tmdb.movies(metadata.id).details()
+        cast = [c.name for c in details.cast[:5]] if hasattr(details, "cast") else []
+        genres = [g.name for g in details.genres] if hasattr(details, "genres") else []
+        record = {
+            "tmdb_id": metadata.id,
+            "imdb_id": getattr(metadata, "imdb_id", ""),
+            "db_index": 1,
+            "title": title,
+            "genres": genres,
+            "description": getattr(metadata, "overview", ""),
+            "rating": getattr(metadata, "vote_average", 0),
+            "release_year": int(getattr(metadata, "release_date", "0").split("-")[0]) if getattr(metadata, "release_date", None) else None,
+            "poster": f"https://image.tmdb.org/t/p/w500{getattr(metadata, 'poster_path', '')}",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{getattr(metadata, 'backdrop_path', '')}",
+            "logo": f"https://image.tmdb.org/t/p/w300{getattr(metadata, 'logo', '')}",
+            "cast": cast,
+            "runtime": f"{getattr(details, 'runtime', '?')} min",
+            "media_type": "movie",
+            "updated_on": str(datetime.utcnow()),
+            "telegram": [{"quality": quality, "id": url, "name": filename, "size": "UNKNOWN"}],
+        }
+        collection = movie_col
+
     await collection.insert_one(record)
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
@@ -111,7 +156,7 @@ async def request_delete(client: Client, message: Message):
         await asyncio.sleep(60)
         if user_id in awaiting_confirmation:
             awaiting_confirmation.pop(user_id, None)
-            await message.reply_text("⏰ Zaman doldu, silme işlemi otomatik olarak iptal edildi.")
+            await message.reply_text("⏰ Zaman doldu, silme işlemi iptal edildi.")
 
     task = asyncio.create_task(timeout())
     awaiting_confirmation[user_id] = task
@@ -130,10 +175,8 @@ async def handle_confirmation(client: Client, message: Message):
     if text == "evet":
         movie_count = await movie_col.count_documents({})
         series_count = await series_col.count_documents({})
-
         await movie_col.delete_many({})
         await series_col.delete_many({})
-
         await message.reply_text(
             f"✅ Silme işlemi tamamlandı.\n\n"
             f"📌 Filmler silindi: {movie_count}\n"
