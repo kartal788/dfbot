@@ -11,16 +11,44 @@ from pyrogram.errors import FloodWait
 from dotenv import load_dotenv
 from Backend.helper.custom_filter import CustomFilters
 
+# ===================== CONFIG =====================
+
 load_dotenv()
 
 PIXELDRAIN_API_KEY = os.getenv("PIXELDRAIN")
 API_BASE = "https://pixeldrain.com/api"
-CMD_FLOOD_WAIT = 5
+UPDATE_INTERVAL = 15
 
-last_command_time = {}
+# ===================== SAFE TELEGRAM =====================
 
+async def safe_reply(message: Message, text: str):
+    try:
+        return await message.reply_text(text)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        return await message.reply_text(text)
+
+async def safe_edit(message: Message, text: str):
+    try:
+        return await message.edit_text(text)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        return await message.edit_text(text)
 
 # ===================== UTIL =====================
+
+def get_headers():
+    auth = base64.b64encode(f":{PIXELDRAIN_API_KEY}".encode()).decode()
+    return {
+        "Authorization": f"Basic {auth}",
+        "User-Agent": "PyrogramBot"
+    }
+
+def human_size(size):
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
 
 def format_duration(seconds: int):
     if seconds < 0:
@@ -37,13 +65,41 @@ def progress_bar(done, total, length=20):
     bar = "█" * filled + "░" * (length - filled)
     return f"[{bar}] {percent}%"
 
-async def auto_update_status(msg, get_text_func, stop_event):
+async def auto_update_status(msg, get_text, stop_event):
     while not stop_event.is_set():
         try:
-            await safe_edit(msg, get_text_func())
+            await safe_edit(msg, get_text())
         except Exception:
             pass
-        await asyncio.sleep(15)
+        await asyncio.sleep(UPDATE_INTERVAL)
+
+# ===================== PIXELDRAIN API =====================
+
+def fetch_all_files_safe(max_pages=100):
+    page = 1
+    files = {}
+
+    while page <= max_pages:
+        r = requests.get(
+            f"{API_BASE}/user/files?page={page}",
+            headers=get_headers(),
+            timeout=15
+        )
+
+        if r.status_code != 200:
+            break
+
+        data = r.json().get("files", [])
+        if not data:
+            break
+
+        for f in data:
+            if f.get("id"):
+                files[f["id"]] = f
+
+        page += 1
+
+    return list(files.values())
 
 # ===================== /PIXELDRAINSIL =====================
 
@@ -56,23 +112,22 @@ async def pixeldrain_delete_all(client: Client, message: Message):
 
     deleted = 0
     total = 0
-    speed = 0.0
     last_files = []
 
     def status_text():
         elapsed = int(time() - start_time)
-        speed_calc = deleted / elapsed if elapsed > 0 else 0
-        eta = int((total - deleted) / speed_calc) if speed_calc > 0 else -1
+        speed = deleted / elapsed if elapsed > 0 else 0
+        eta = int((total - deleted) / speed) if speed > 0 else -1
 
         return (
             "🗑️ **PixelDrain Silme Durumu**\n\n"
             "```\n"
             f"Geçen Süre : {format_duration(elapsed)}\n"
             f"İlerleme   : {progress_bar(deleted, total)}\n"
-            f"Hız        : {speed_calc:.2f} dosya/sn\n"
+            f"Hız        : {speed:.2f} dosya/sn\n"
             f"ETA        : {format_duration(eta)}\n"
             f"Silinen    : {deleted}/{total}\n\n"
-            f"Son Dosyalar:\n" +
+            "Son Dosyalar:\n" +
             "\n".join(f"- {n}" for n in last_files[-5:]) +
             "\n```"
         )
@@ -94,9 +149,6 @@ async def pixeldrain_delete_all(client: Client, message: Message):
         for f in files:
             file_id = f.get("id")
             name = f.get("name", "isimsiz")
-
-            if not file_id:
-                continue
 
             await asyncio.to_thread(
                 requests.delete,
@@ -135,13 +187,12 @@ async def pixeldrain_list(client: Client, message: Message):
 
     stop_event = asyncio.Event()
     start_time = time()
-
     files = []
-    total_bytes = 0
 
     def status_text():
         elapsed = int(time() - start_time)
         speed = len(files) / elapsed if elapsed > 0 else 0
+        total_bytes = sum(f.get("size", 0) for f in files)
 
         return (
             "📂 **PixelDrain Listeleme**\n\n"
@@ -185,7 +236,7 @@ async def pixeldrain_list(client: Client, message: Message):
                 message.chat.id,
                 path,
                 caption=(
-                    "📊 **PixelDrain Özet**\n\n"
+                    "📊 PixelDrain Özet\n\n"
                     f"Toplam Dosya : {len(files)}\n"
                     f"Toplam Boyut : {human_size(total_bytes)}"
                 )
@@ -198,47 +249,3 @@ async def pixeldrain_list(client: Client, message: Message):
         updater.cancel()
         await safe_edit(status, "❌ Listeleme sırasında hata oluştu.")
         print("PixelDrain list error:", e)
-
-# ---------------- /PIXELDRAINSIL ----------------
-
-@Client.on_message(filters.command("pixeldrainsil") & filters.private & CustomFilters.owner)
-async def pixeldrain_delete_all(client: Client, message: Message):
-    status = await safe_reply(message, "🗑️ PixelDrain dosyaları alınıyor...")
-
-    try:
-        files = await asyncio.to_thread(fetch_all_files_safe)
-
-        if not files:
-            await safe_edit(status, "ℹ️ Silinecek dosya yok.")
-            return
-
-        await safe_edit(
-            status,
-            f"🗑️ **Silme başlatıldı**\n\n"
-            f"Silinecek dosya: {len(files)}"
-        )
-
-        deleted = 0
-        for f in files:
-            file_id = f.get("id")
-            if not file_id:
-                continue
-
-            await asyncio.to_thread(
-                requests.delete,
-                f"{API_BASE}/file/{file_id}",
-                headers=get_headers(),
-                timeout=10
-            )
-
-            deleted += 1
-            await asyncio.sleep(0.3)
-
-        await safe_edit(
-            status,
-            f"✅ Silme tamamlandı.\nSilinen dosya: {deleted}"
-        )
-
-    except Exception as e:
-        await safe_edit(status, "❌ Silme sırasında hata oluştu.")
-        print("PixelDrain delete error:", e)
