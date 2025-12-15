@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}System Status - Telegram Stremio{% endblock %}
+{% block title %}Sistem Durumu{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
     <!-- Header -->
     <div class="mb-8 text-center">
-        <h1 class="text-3xl font-bold">System Status</h1>
-        <p class="theme-text-secondary mt-2">Current status of Telegram Stremio services</p>
+        <h1 class="text-3xl font-bold">Sistem Durumu</h1>
+        <p class="theme-text-secondary mt-2">Telegram Stremio hizmetlerinin mevcut durumu</p>
     </div>
     
     <!-- Status Cards -->
@@ -16,7 +16,7 @@
             <div class="w-16 h-16 mx-auto mb-4 theme-primary rounded-full flex items-center justify-center">
                 <span class="text-white text-2xl">✓</span>
             </div>
-            <h3 class="text-lg font-semibold mb-2">Backend Status</h3>
+            <h3 class="text-lg font-semibold mb-2">Uygulama Durumu</h3>
             <p class="text-green-600 font-medium">{{ stats.status|title }}</p>
         </div>
         
@@ -24,7 +24,7 @@
             <div class="w-16 h-16 mx-auto mb-4 bg-blue-500 rounded-full flex items-center justify-center">
                 <span class="text-white text-2xl">↑</span>
             </div>
-            <h3 class="text-lg font-semibold mb-2">Uptime</h3>
+            <h3 class="text-lg font-semibold mb-2">Çalışma süresi</h3>
             <p class="text-green-600 font-medium">{{ stats.uptime }}</p>
         </div>
         
@@ -32,26 +32,26 @@
             <div class="w-16 h-16 mx-auto mb-4 bg-purple-500 rounded-full flex items-center justify-center">
                 <span class="text-white text-2xl">v</span>
             </div>
-            <h3 class="text-lg font-semibold mb-2">Version</h3>
-            <p class="theme-text-secondary font-medium">{{ stats.version }}</p>
+            <h3 class="text-lg font-semibold mb-2">Versiyon</h3>
+            <p class="theme-text-secondary font-medium">1.4.4</p>
         </div>
     </div>
     
     <!-- Services Status -->
     <div class="theme-card p-6 rounded-lg shadow mb-8">
-        <h2 class="text-xl font-semibold mb-4">Service Status</h2>
+        <h2 class="text-xl font-semibold mb-4">Hizmet Durumu</h2>
         <div class="space-y-4">
             <div class="flex justify-between items-center">
                 <span>API Endpoints</span>
-                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Active</span>
+                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Aktif</span>
             </div>
             <div class="flex justify-between items-center">
-                <span>Stremio Addon</span>
-                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Active</span>
+                <span>Stremio Eklentisi</span>
+                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Aktif</span>
             </div>
             <div class="flex justify-between items-center">
-                <span>Database</span>
-                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Connected</span>
+                <span>Veritabanı</span>
+                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">Bağlı</span>
             </div>
         </div>
     </div>
@@ -59,10 +59,10 @@
     {% if not is_authenticated %}
     <!-- Admin Access -->
     <div class="theme-card p-6 rounded-lg shadow text-center">
-        <h2 class="text-xl font-semibold mb-4">Administrator Access</h2>
-        <p class="theme-text-secondary mb-4">Login to access the full admin dashboard</p>
+        <h2 class="text-xl font-semibold mb-4">Yönetici Erişimi</h2>
+        <p class="theme-text-secondary mb-4">Yönetici panosuna erişmek için giriş yapın</p>
         <a href="/login" class="theme-primary text-white px-6 py-3 rounded-md hover:opacity-90 transition-opacity inline-block">
-            Admin Login
+            Yönetici Girişi
         </a>
     </div>
     {% endif %}
