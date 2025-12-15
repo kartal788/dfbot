@@ -51,19 +51,91 @@ def get_year(date_obj):
             return None
     elif hasattr(date_obj, "year"):
         return date_obj.year
-    else:
-        return None
+    return None
 
 def pixeldrain_to_api(url: str) -> str:
-    """
-    Pixeldrain linkini API formatına çevirir:
-    https://pixeldrain.com/u/6Hk -> https://pixeldrain.com/api/file/6Hk
-    """
     match = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
     if match:
         file_id = match.group(1)
         return f"https://pixeldrain.com/api/file/{file_id}"
     return url
+
+def safe_getattr(obj, attr, default=None):
+    """Objeden güvenli şekilde attribute alır, yoksa default döner."""
+    return getattr(obj, attr, default) or default
+
+def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
+    title = safe_getattr(metadata, "title", safe_getattr(metadata, "name", filename))
+    release_date = safe_getattr(metadata, "release_date", safe_getattr(metadata, "first_air_date"))
+    release_year = get_year(release_date)
+    genres = [g.name for g in safe_getattr(details, "genres", [])]
+    cast = [c.name for c in safe_getattr(details, "cast", [])[:5]]
+    poster = safe_getattr(metadata, "poster_path", "")
+    backdrop = safe_getattr(metadata, "backdrop_path", "")
+    logo = safe_getattr(metadata, "logo", "")
+
+    if media_type == "movie":
+        runtime_val = safe_getattr(details, "runtime")
+        runtime = f"{runtime_val} min" if runtime_val else "UNKNOWN"
+        record = {
+            "tmdb_id": metadata.id,
+            "imdb_id": safe_getattr(metadata, "imdb_id", ""),
+            "db_index": 1,
+            "title": title,
+            "genres": genres,
+            "description": safe_getattr(metadata, "overview", ""),
+            "rating": safe_getattr(metadata, "vote_average", 0),
+            "release_year": release_year,
+            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
+            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+            "cast": cast,
+            "runtime": runtime,
+            "media_type": "movie",
+            "updated_on": str(datetime.utcnow()),
+            "telegram": [{
+                "quality": quality,
+                "id": url,
+                "name": filename,
+                "size": "UNKNOWN"
+            }],
+        }
+    else:  # TV series
+        episode_runtime_list = safe_getattr(details, "episode_run_time", [])
+        runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
+
+        record = {
+            "tmdb_id": metadata.id,
+            "imdb_id": safe_getattr(metadata, "imdb_id", ""),
+            "db_index": 1,
+            "title": title,
+            "genres": genres,
+            "description": safe_getattr(metadata, "overview", ""),
+            "rating": safe_getattr(metadata, "vote_average", 0),
+            "release_year": release_year,
+            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
+            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+            "cast": cast,
+            "runtime": runtime,
+            "media_type": "tv",
+            "updated_on": str(datetime.utcnow()),
+            "seasons": [{
+                "season_number": season,
+                "episodes": [{
+                    "episode_number": episode,
+                    "title": filename,
+                    "overview": safe_getattr(metadata, "overview", ""),
+                    "telegram": [{
+                        "quality": quality,
+                        "id": url,
+                        "name": filename,
+                        "size": "UNKNOWN"
+                    }]
+                }]
+            }]
+        }
+    return record
 
 # ----------------- /ekle Komutu -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
@@ -73,8 +145,7 @@ async def add_file(client: Client, message: Message):
         await message.reply_text("Kullanım: /ekle <URL> <DosyaAdı>")
         return
 
-    url = message.command[1]
-    url = pixeldrain_to_api(url)  # Pixeldrain linklerini API formatına çevir
+    url = pixeldrain_to_api(message.command[1])
     filename = " ".join(message.command[2:])
 
     try:
@@ -93,94 +164,23 @@ async def add_file(client: Client, message: Message):
         await message.reply_text("Başlık bulunamadı, lütfen doğru bir dosya adı girin.")
         return
 
-    # Encode string
-    data = {"chat_id": message.chat.id, "msg_id": message.id}
-    try:
-        encoded_string = await encode_string(data)
-    except Exception:
-        encoded_string = None
-
-    # TMDb arama
     async with API_SEMAPHORE:
         if season and episode:
             search_result = await tmdb.search().tv(query=title)
+            collection = series_col
+            media_type = "tv"
         else:
             search_result = await tmdb.search().movies(query=title, year=year)
+            collection = movie_col
+            media_type = "movie"
 
     if not search_result:
         await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
         return
 
     metadata = search_result[0]
-
-    # TMDb detay çekme ve kayıt oluşturma
-    if season:
-        details = await tmdb.tv(metadata.id).details()
-        cast = [c.name for c in getattr(details, "cast", [])[:5]]
-        genres = [g.name for g in getattr(details, "genres", [])]
-        release_year = get_year(getattr(metadata, "first_air_date", None))
-        record = {
-            "tmdb_id": metadata.id,
-            "imdb_id": getattr(metadata, "imdb_id", ""),
-            "db_index": 1,
-            "title": title,
-            "genres": genres,
-            "description": getattr(metadata, "overview", ""),
-            "rating": getattr(metadata, "vote_average", 0),
-            "release_year": release_year,
-            "poster": f"https://image.tmdb.org/t/p/w500{getattr(metadata, 'poster_path', '')}",
-            "backdrop": f"https://image.tmdb.org/t/p/w780{getattr(metadata, 'backdrop_path', '')}",
-            "logo": f"https://image.tmdb.org/t/p/w300{getattr(metadata, 'logo', '')}",
-            "cast": cast,
-            "runtime": f"{getattr(details, 'episode_run_time', ['?'])[0]} min",
-            "media_type": "tv",
-            "updated_on": str(datetime.utcnow()),
-            "seasons": [{
-                "season_number": season,
-                "episodes": [{
-                    "episode_number": episode,
-                    "title": filename,
-                    "overview": getattr(metadata, 'overview', ''),
-                    "telegram": [{
-                        "quality": quality,
-                        "id": url,
-                        "name": filename,
-                        "size": "UNKNOWN"
-                    }]
-                }]
-            }],
-        }
-        collection = series_col
-    else:
-        details = await tmdb.movie(metadata.id).details()
-        cast = [c.name for c in getattr(details, "cast", [])[:5]]
-        genres = [g.name for g in getattr(details, "genres", [])]
-        release_year = get_year(getattr(metadata, "release_date", None))
-        record = {
-            "tmdb_id": metadata.id,
-            "imdb_id": getattr(metadata, "imdb_id", ""),
-            "db_index": 1,
-            "title": title,
-            "genres": genres,
-            "description": getattr(metadata, "overview", ""),
-            "rating": getattr(metadata, "vote_average", 0),
-            "release_year": release_year,
-            "poster": f"https://image.tmdb.org/t/p/w500{getattr(metadata, 'poster_path', '')}",
-            "backdrop": f"https://image.tmdb.org/t/p/w780{getattr(metadata, 'backdrop_path', '')}",
-            "logo": f"https://image.tmdb.org/t/p/w300{getattr(metadata, 'logo', '')}",
-            "cast": cast,
-            "runtime": f"{getattr(details, 'runtime', '?')} min",
-            "media_type": "movie",
-            "updated_on": str(datetime.utcnow()),
-            "telegram": [{
-                "quality": quality,
-                "id": url,
-                "name": filename,
-                "size": "UNKNOWN"
-            }],
-        }
-        collection = movie_col
-
+    details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
+    record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
     await collection.insert_one(record)
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
@@ -195,7 +195,9 @@ async def request_delete(client: Client, message: Message):
     )
 
     if user_id in awaiting_confirmation:
-        awaiting_confirmation[user_id].cancel()
+        task = awaiting_confirmation.pop(user_id, None)
+        if task:
+            task.cancel()
 
     async def timeout():
         await asyncio.sleep(60)
@@ -212,11 +214,12 @@ async def handle_confirmation(client: Client, message: Message):
     if user_id not in awaiting_confirmation:
         return
 
-    text = message.text.strip().lower()
-    awaiting_confirmation[user_id].cancel()
-    awaiting_confirmation.pop(user_id, None)
+    task = awaiting_confirmation.pop(user_id, None)
+    if task:
+        task.cancel()
 
-    await init_db()  # İkinci DB bağlanmış olacak
+    text = message.text.strip().lower()
+    await init_db()
     if text == "evet":
         movie_count = await movie_col.count_documents({})
         series_count = await series_col.count_documents({})
