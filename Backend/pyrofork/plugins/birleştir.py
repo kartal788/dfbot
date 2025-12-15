@@ -8,7 +8,7 @@ import PTN
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 from themoviedb import aioTMDb
 
 from Backend.helper.custom_filter import CustomFilters
@@ -25,21 +25,22 @@ MONGO_URL = DB_URLS[1]
 TMDB_API = os.getenv("TMDB_API", "")
 
 # ================= MONGO =================
-mongo_client = AsyncIOMotorClient(MONGO_URL)
+mongo_client = MongoClient(MONGO_URL)
 db = None
 movie_col = None
 series_col = None
 
-async def init_db():
+def init_db():
+    """MongoDB bağlantısını başlat"""
     global db, movie_col, series_col
     if db is not None:
         return
-    db_names = await mongo_client.list_database_names()
+    db_names = mongo_client.list_database_names()
     if not db_names:
         raise Exception("MongoDB içinde veritabanı bulunamadı!")
     db = mongo_client[db_names[0]]
-    movie_col = db["movie"]
-    series_col = db["tv"]
+    movie_col = db.movie
+    series_col = db.tv
 
 # ================= TMDB =================
 tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
@@ -58,14 +59,14 @@ async def send_error_file(client: Client, chat_id: int, error: Exception):
             error_file = f.name
         await client.send_document(chat_id=chat_id, document=error_file, caption="⚠️ Hata oluştu")
         os.remove(error_file)
-    except Exception as e:
+    except Exception:
         LOGGER.exception("Hata dosyası gönderilemedi")
 
 # ================= /EKLE =================
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_file(client: Client, message: Message):
     try:
-        await init_db()
+        init_db()
         if len(message.command) < 3:
             await message.reply_text("Kullanım: /ekle <URL> <DosyaAdı>")
             return
@@ -119,7 +120,7 @@ async def add_file(client: Client, message: Message):
         }
 
         collection = series_col if season else movie_col
-        await collection.insert_one(record)
+        collection.insert_one(record)  # pymongo senkron
         await message.reply_text(f"✅ **{title}** eklendi.")
 
     except Exception as e:
@@ -162,14 +163,14 @@ async def handle_delete_confirmation(client: Client, message: Message):
 
         awaiting_confirmation[user_id].cancel()
         awaiting_confirmation.pop(user_id, None)
-        await init_db()
+        init_db()
         text = message.text.lower().strip()
 
         if text == "evet":
-            movie_count = await movie_col.count_documents({})
-            series_count = await series_col.count_documents({})
-            await movie_col.delete_many({})
-            await series_col.delete_many({})
+            movie_count = movie_col.count_documents({})
+            series_count = series_col.count_documents({})
+            movie_col.delete_many({})
+            series_col.delete_many({})
             await message.reply_text(
                 f"✅ **Silme tamamlandı**\n\n"
                 f"🎬 Filmler: {movie_count}\n"
@@ -194,10 +195,10 @@ async def download_collections(client: Client, message: Message):
             return
 
         last_command_time[user_id] = now
-        await init_db()
+        init_db()
 
-        movie_data = await movie_col.find({}, {"_id": 0}).to_list(None)
-        tv_data = await series_col.find({}, {"_id": 0}).to_list(None)
+        movie_data = list(movie_col.find({}, {"_id": 0}))
+        tv_data = list(series_col.find({}, {"_id": 0}))
 
         if not movie_data and not tv_data:
             await message.reply_text("⚠️ Koleksiyonlar boş.")
