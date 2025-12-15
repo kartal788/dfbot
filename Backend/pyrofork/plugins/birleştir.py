@@ -9,6 +9,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pymongo import MongoClient
 from themoviedb import aioTMDb
+from Backend.helper.custom_filter import CustomFilters  # Eğer varsa
 
 # ================= ENV =================
 DATABASE_RAW = os.getenv("DATABASE", "")
@@ -147,45 +148,47 @@ async def handle_delete_confirmation(client: Client, message: Message):
         await message.reply_text(f"❌ Hata: {e}")
 
 # ================= /VINDIR =================
-@Client.on_message(filters.command("vindir") & filters.private)
+def export_collections_to_json(url):
+    client = MongoClient(url)
+    db_name_list = client.list_database_names()
+    if not db_name_list:
+        return None
+
+    db = client[db_name_list[0]]
+    movie_data = list(db["movie"].find({}, {"_id": 0}))
+    tv_data = list(db["tv"].find({}, {"_id": 0}))
+
+    return {"movie": movie_data, "tv": tv_data}
+
+@Client.on_message(filters.command("vindir") & filters.private & CustomFilters.owner)
 async def download_collections(client: Client, message: Message):
+    user_id = message.from_user.id
+    now = time.time()
+
+    if user_id in last_command_time and now - last_command_time[user_id] < flood_wait:
+        wait = flood_wait - (now - last_command_time[user_id])
+        await message.reply_text(f"⚠️ Lütfen {wait:.1f} saniye bekleyin.")
+        return
+    last_command_time[user_id] = now
+
     try:
-        user_id = message.from_user.id
-        now = time.time()
-        if user_id in last_command_time and now - last_command_time[user_id] < flood_wait:
-            wait = flood_wait - (now - last_command_time[user_id])
-            await message.reply_text(f"⚠️ Lütfen {wait:.1f} saniye bekleyin.")
+        if not DB_URLS or len(DB_URLS) < 2:
+            await message.reply_text("⚠️ İkinci veritabanı bulunamadı.")
             return
 
-        last_command_time[user_id] = now
-        init_db()
-
-        if movie_col is None or series_col is None:
-            await message.reply_text("❌ Veritabanı koleksiyonları bulunamadı.")
+        combined_data = export_collections_to_json(DB_URLS[1])
+        if not combined_data or (not combined_data["movie"] and not combined_data["tv"]):
+            await message.reply_text("⚠️ Koleksiyonlar boş veya bulunamadı.")
             return
 
-        # MongoDB'den verileri çek
-        movies = list(movie_col.find({}, {"_id": 0}))
-        tv_shows = list(series_col.find({}, {"_id": 0}))
-
-        if not movies and not tv_shows:
-            await message.reply_text("⚠️ Koleksiyonlar boş.")
-            return
-
-        data = {
-            "movie": movies,
-            "tv": tv_shows
-        }
-
-        # Geçici JSON dosyası oluştur
         tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w", encoding="utf-8")
         try:
-            json.dump(data, tmp_file, ensure_ascii=False, indent=2, default=str)
+            json.dump(combined_data, tmp_file, ensure_ascii=False, indent=2, default=str)
             tmp_file.close()
             await client.send_document(
                 chat_id=message.chat.id,
                 document=tmp_file.name,
-                caption="📁 Film ve Dizi Veritabanı"
+                caption="📁 Film ve Dizi Koleksiyonları"
             )
         finally:
             if os.path.exists(tmp_file.name):
@@ -193,4 +196,3 @@ async def download_collections(client: Client, message: Message):
 
     except Exception as e:
         await message.reply_text(f"❌ Hata: {e}")
-
