@@ -1,8 +1,6 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from Backend.helper.custom_filter import CustomFilters
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import MongoClient
 import os
 import asyncio
 import json
@@ -11,30 +9,26 @@ from time import time
 from Backend.helper.encrypt import encode_string
 from Backend.logger import LOGGER
 from themoviedb import aioTMDb
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 import tempfile
 import traceback
 
 # ----------------- ENV -----------------
-DATABASE_URLS = os.getenv("DATABASE", "")
-db_urls = [u.strip() for u in DATABASE_URLS.split(",") if u.strip()]
-if len(db_urls) < 2:
-    raise Exception("İkinci DATABASE bulunamadı!")
-MONGO_URL = db_urls[1]
+MONGO_URL = os.getenv("MONGO_URL", "")  # MongoDB connection string
+DB_NAME = "dbFyvio"  # Sabit database ismi
 
 TMDB_API = os.getenv("TMDB_API", "")
 
 # ----------------- Mongo Async -----------------
 client = AsyncIOMotorClient(MONGO_URL)
-db = None
-movie_col = None
-series_col = None
+db = client[DB_NAME]
+movie_col = db["movie"]
+series_col = db["tv"]
 
 async def init_db():
     global db, movie_col, series_col
-    db_names = await client.list_database_names()
-    if len(db_names) < 2:
-        raise Exception("İkinci database bulunamadı!")
-    db = client[db_names[1]]  # ikinci database
+    db = client[DB_NAME]
     movie_col = db["movie"]
     series_col = db["tv"]
 
@@ -159,12 +153,9 @@ async def handle_confirmation(client: Client, message: Message):
         await message.reply_text("❌ Silme işlemi iptal edildi.")
 
 # ----------------- /vindir Komutu -----------------
-def export_collections_to_json(url):
+def export_collections_to_json(url, db_name):
     client = MongoClient(url)
-    db_names = client.list_database_names()
-    if len(db_names) < 2:
-        return None
-    db = client[db_names[1]]  # ikinci database
+    db = client[db_name]
     movie_data = list(db["movie"].find({}, {"_id": 0}))
     tv_data = list(db["tv"].find({}, {"_id": 0}))
     return {"movie": movie_data, "tv": tv_data}
@@ -180,7 +171,7 @@ async def download_collections(client: Client, message: Message):
     last_command_time[user_id] = now
 
     try:
-        combined_data = export_collections_to_json(MONGO_URL)
+        combined_data = export_collections_to_json(MONGO_URL, DB_NAME)
         if combined_data is None:
             await message.reply_text("⚠️ Koleksiyonlar boş veya bulunamadı.")
             return
