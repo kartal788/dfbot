@@ -12,11 +12,12 @@ from Backend.helper.custom_filter import CustomFilters
 # ----------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
-if len(db_urls) < 1:
-    raise Exception("DATABASE bulunamadı!")
-MONGO_URL = db_urls[0]
+if len(db_urls) < 2:
+    raise Exception("İkinci DATABASE URL bulunamadı!")
 
-DB_NAME = os.getenv("DB_NAME", "dbFyvio")
+MONGO_URL = db_urls[1]  # İkinci database
+DB_NAME = "dbFyvio"
+
 TMDB_API = os.getenv("TMDB_API", "")
 if not TMDB_API:
     raise Exception("TMDB_API bulunamadı!")
@@ -39,6 +40,18 @@ API_SEMAPHORE = asyncio.Semaphore(12)
 
 # ----------------- Onay Bekleyen -----------------
 awaiting_confirmation = {}
+
+# ----------------- Yardımcı Fonksiyonlar -----------------
+def get_year(date_obj):
+    if isinstance(date_obj, str):
+        try:
+            return int(date_obj.split("-")[0])
+        except:
+            return None
+    elif hasattr(date_obj, "year"):
+        return date_obj.year
+    else:
+        return None
 
 # ----------------- /ekle Komutu -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
@@ -87,11 +100,12 @@ async def add_file(client: Client, message: Message):
 
     metadata = search_result[0]
 
-    # TMDb detay çekme (düzeltildi: movies() -> movie())
+    # TMDb detay çekme
     if season:
         details = await tmdb.tv(metadata.id).details()
         cast = [c.name for c in getattr(details, "cast", [])[:5]]
         genres = [g.name for g in getattr(details, "genres", [])]
+        release_year = get_year(getattr(metadata, "first_air_date", None))
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": getattr(metadata, "imdb_id", ""),
@@ -100,7 +114,7 @@ async def add_file(client: Client, message: Message):
             "genres": genres,
             "description": getattr(metadata, "overview", ""),
             "rating": getattr(metadata, "vote_average", 0),
-            "release_year": int(getattr(metadata, "first_air_date", "0").split("-")[0]) if getattr(metadata, "first_air_date", None) else None,
+            "release_year": release_year,
             "poster": f"https://image.tmdb.org/t/p/w500{getattr(metadata, 'poster_path', '')}",
             "backdrop": f"https://image.tmdb.org/t/p/w780{getattr(metadata, 'backdrop_path', '')}",
             "logo": f"https://image.tmdb.org/t/p/w300{getattr(metadata, 'logo', '')}",
@@ -108,13 +122,27 @@ async def add_file(client: Client, message: Message):
             "runtime": f"{getattr(details, 'episode_run_time', ['?'])[0]} min",
             "media_type": "tv",
             "updated_on": str(datetime.utcnow()),
-            "seasons": [{"season_number": season, "episodes": [{"episode_number": episode, "title": filename, "overview": getattr(metadata, 'overview', ''), "telegram": [{"quality": quality, "id": url, "name": filename, "size": "UNKNOWN"}]}]}],
+            "seasons": [{
+                "season_number": season,
+                "episodes": [{
+                    "episode_number": episode,
+                    "title": filename,
+                    "overview": getattr(metadata, 'overview', ''),
+                    "telegram": [{
+                        "quality": quality,
+                        "id": url,
+                        "name": filename,
+                        "size": "UNKNOWN"
+                    }]
+                }]
+            }],
         }
         collection = series_col
     else:
-        details = await tmdb.movie(metadata.id).details()  # Düzeltildi
+        details = await tmdb.movie(metadata.id).details()
         cast = [c.name for c in getattr(details, "cast", [])[:5]]
         genres = [g.name for g in getattr(details, "genres", [])]
+        release_year = get_year(getattr(metadata, "release_date", None))
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": getattr(metadata, "imdb_id", ""),
@@ -123,7 +151,7 @@ async def add_file(client: Client, message: Message):
             "genres": genres,
             "description": getattr(metadata, "overview", ""),
             "rating": getattr(metadata, "vote_average", 0),
-            "release_year": int(getattr(metadata, "release_date", "0").split("-")[0]) if getattr(metadata, "release_date", None) else None,
+            "release_year": release_year,
             "poster": f"https://image.tmdb.org/t/p/w500{getattr(metadata, 'poster_path', '')}",
             "backdrop": f"https://image.tmdb.org/t/p/w780{getattr(metadata, 'backdrop_path', '')}",
             "logo": f"https://image.tmdb.org/t/p/w300{getattr(metadata, 'logo', '')}",
@@ -131,7 +159,12 @@ async def add_file(client: Client, message: Message):
             "runtime": f"{getattr(details, 'runtime', '?')} min",
             "media_type": "movie",
             "updated_on": str(datetime.utcnow()),
-            "telegram": [{"quality": quality, "id": url, "name": filename, "size": "UNKNOWN"}],
+            "telegram": [{
+                "quality": quality,
+                "id": url,
+                "name": filename,
+                "size": "UNKNOWN"
+            }],
         }
         collection = movie_col
 
@@ -170,7 +203,7 @@ async def handle_confirmation(client: Client, message: Message):
     awaiting_confirmation[user_id].cancel()
     awaiting_confirmation.pop(user_id, None)
 
-    await init_db()
+    await init_db()  # İkinci DB bağlanmış olacak
     if text == "evet":
         movie_count = await movie_col.count_documents({})
         series_count = await series_col.count_documents({})
