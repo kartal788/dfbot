@@ -74,11 +74,18 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
     backdrop = safe_getattr(metadata, "backdrop_path", "")
     logo = safe_getattr(metadata, "logo", "")
 
+    telegram_entry = {
+        "quality": quality or "UNKNOWN",
+        "id": url or "UNKNOWN",
+        "name": filename or "UNKNOWN",
+        "size": "UNKNOWN"
+    }
+
     if media_type == "movie":
         runtime_val = safe_getattr(details, "runtime")
         runtime = f"{runtime_val} min" if runtime_val else "UNKNOWN"
         record = {
-            "tmdb_id": metadata.id,
+            "tmdb_id": safe_getattr(metadata, "id", 0),
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
             "db_index": 1,
             "title": title,
@@ -86,26 +93,23 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
-            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
-            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+            "poster": f"https://image.tmdb.org/t/p/w500{poster}" if poster else "",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}" if backdrop else "",
+            "logo": f"https://image.tmdb.org/t/p/w300{logo}" if logo else "",
             "cast": cast,
             "runtime": runtime,
             "media_type": "movie",
             "updated_on": str(datetime.utcnow()),
-            "telegram": [{
-                "quality": quality,
-                "id": url,
-                "name": filename,
-                "size": "UNKNOWN"
-            }],
+            "telegram": [telegram_entry],
         }
     else:
+        season = season or 1
+        episode = episode or 1
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
 
         record = {
-            "tmdb_id": metadata.id,
+            "tmdb_id": safe_getattr(metadata, "id", 0),
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
             "db_index": 1,
             "title": title,
@@ -113,9 +117,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
-            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
-            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+            "poster": f"https://image.tmdb.org/t/p/w500{poster}" if poster else "",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}" if backdrop else "",
+            "logo": f"https://image.tmdb.org/t/p/w300{logo}" if logo else "",
             "cast": cast,
             "runtime": runtime,
             "media_type": "tv",
@@ -124,14 +128,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "season_number": season,
                 "episodes": [{
                     "episode_number": episode,
-                    "title": filename,
+                    "title": filename or title,
                     "overview": safe_getattr(metadata, "overview", ""),
-                    "telegram": [{
-                        "quality": quality,
-                        "id": url,
-                        "name": filename,
-                        "size": "UNKNOWN"
-                    }]
+                    "telegram": [telegram_entry]  # TV bölümlerinde artık hep var
                 }]
             }]
         }
@@ -183,11 +182,28 @@ async def add_file(client: Client, message: Message):
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
 
     # Duplicate kontrol ve güncelleme
-    await collection.update_one(
-        {"tmdb_id": metadata.id},
-        {"$push": {"telegram": record["telegram"][0]}},
-        upsert=True
-    )
+    if media_type == "movie":
+        await collection.update_one(
+            {"tmdb_id": metadata.id},
+            {"$push": {"telegram": record["telegram"][0]}},
+            upsert=True
+        )
+    else:
+        # TV dizisi için seasons/episodes içine telegram ekleme
+        existing = await collection.find_one({"tmdb_id": metadata.id})
+        if existing:
+            season_list = existing.get("seasons", [])
+            found = False
+            for s in season_list:
+                if s.get("season_number") == season:
+                    s["episodes"].append(record["seasons"][0]["episodes"][0])
+                    found = True
+                    break
+            if not found:
+                season_list.append(record["seasons"][0])
+            await collection.update_one({"tmdb_id": metadata.id}, {"$set": {"seasons": season_list}})
+        else:
+            await collection.insert_one(record)
 
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
