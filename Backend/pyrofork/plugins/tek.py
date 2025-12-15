@@ -7,6 +7,7 @@ from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
 from themoviedb import aioTMDb
 import PTN
+from Backend.helper.encrypt import encode_string
 from Backend.helper.custom_filter import CustomFilters
 
 # ----------------- ENV -----------------
@@ -15,7 +16,7 @@ db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip()
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
 
-MONGO_URL = db_urls[1]
+MONGO_URL = db_urls[1]  # İkinci database
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -25,14 +26,10 @@ if not TMDB_API:
 # ----------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
-movie_col = db["movie"]
-series_col = db["tv"]
 
 async def init_db():
-    global db, movie_col, series_col
+    global db
     db = client[DB_NAME]
-    movie_col = db["movie"]
-    series_col = db["tv"]
 
 # ----------------- TMDb -----------------
 tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
@@ -60,6 +57,7 @@ def pixeldrain_to_api(url: str) -> str:
     return url
 
 def safe_getattr(obj, attr, default=None):
+    """Objeden güvenli şekilde attribute alır, yoksa default döner."""
     return getattr(obj, attr, default) or default
 
 def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
@@ -84,9 +82,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
-            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
-            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+            "poster": f"https://images.metahub.space/poster/small/{safe_getattr(metadata, 'imdb_id','')}/img",
+            "backdrop": f"https://images.metahub.space/background/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
+            "logo": f"https://images.metahub.space/logo/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
             "cast": cast,
             "runtime": runtime,
             "media_type": "movie",
@@ -102,9 +100,6 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
 
-        episode_release_date = safe_getattr(metadata, "air_date", None)
-        episode_backdrop = safe_getattr(metadata, "still_path", "")
-
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
@@ -114,9 +109,9 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
-            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
-            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
+            "poster": f"https://images.metahub.space/poster/small/{safe_getattr(metadata, 'imdb_id','')}/img",
+            "backdrop": f"https://images.metahub.space/background/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
+            "logo": f"https://images.metahub.space/logo/medium/{safe_getattr(metadata, 'imdb_id','')}/img",
             "cast": cast,
             "runtime": runtime,
             "media_type": "tv",
@@ -127,8 +122,6 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                     "episode_number": episode,
                     "title": filename,
                     "overview": safe_getattr(metadata, "overview", ""),
-                    "released": episode_release_date,
-                    "episode_backdrop": f"https://image.tmdb.org/t/p/w780{episode_backdrop}",
                     "telegram": [{
                         "quality": quality,
                         "id": url,
@@ -168,64 +161,32 @@ async def add_file(client: Client, message: Message):
         return
 
     async with API_SEMAPHORE:
-        if season and episode:  # TV dizisi ve bölüm
+        if season and episode:
             search_result = await tmdb.search().tv(query=title)
-            collection = series_col
             media_type = "tv"
-
-            if not search_result:
-                await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
-                return
-
-            show_metadata = search_result[0]
-            show_details = await tmdb.tv(show_metadata.id).details()
-            episode_metadata = await tmdb.tv_episode(show_metadata.id, season, episode).details()
-
-            exists = await collection.find_one({
-                "tmdb_id": show_metadata.id,
-                "seasons.episodes.episode_number": episode
-            })
-            if exists:
-                await message.reply_text(f"{title} - S{season}E{episode} zaten mevcut.")
-                return
-
-            record = build_media_record(
-                metadata=episode_metadata,
-                details=show_details,
-                filename=filename,
-                url=url,
-                quality=quality,
-                media_type="tv",
-                season=season,
-                episode=episode
-            )
-        else:  # Film
+        else:
             search_result = await tmdb.search().movies(query=title, year=year)
-            collection = movie_col
             media_type = "movie"
 
-            if not search_result:
-                await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
-                return
+    if not search_result:
+        await message.reply_text(f"{title} için TMDb sonucu bulunamadı.")
+        return
 
-            metadata = search_result[0]
-            details = await tmdb.movie(metadata.id).details()
+    metadata = search_result[0]
+    details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
+    record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
 
-            exists = await collection.find_one({"tmdb_id": metadata.id})
-            if exists:
-                await message.reply_text(f"{title} zaten mevcut.")
-                return
+    # Tek bir dokümanda movie ve tv listeleri
+    media_doc = await db["media"].find_one({"_id": 1})
+    if not media_doc:
+        media_doc = {"_id": 1, "movie": [], "tv": []}
 
-            record = build_media_record(
-                metadata=metadata,
-                details=details,
-                filename=filename,
-                url=url,
-                quality=quality,
-                media_type="movie"
-            )
+    if media_type == "movie":
+        media_doc["movie"].append(record)
+    else:
+        media_doc["tv"].append(record)
 
-    await collection.insert_one(record)
+    await db["media"].replace_one({"_id": 1}, media_doc, upsert=True)
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
 # ----------------- /sil Komutu -----------------
@@ -265,14 +226,14 @@ async def handle_confirmation(client: Client, message: Message):
     text = message.text.strip().lower()
     await init_db()
     if text == "evet":
-        movie_count = await movie_col.count_documents({})
-        series_count = await series_col.count_documents({})
-        await movie_col.delete_many({})
-        await series_col.delete_many({})
+        media_doc = await db["media"].find_one({"_id": 1})
+        movie_count = len(media_doc["movie"]) if media_doc else 0
+        tv_count = len(media_doc["tv"]) if media_doc else 0
+        await db["media"].delete_one({"_id": 1})
         await message.reply_text(
             f"✅ Silme işlemi tamamlandı.\n\n"
             f"📌 Filmler silindi: {movie_count}\n"
-            f"📌 Diziler silindi: {series_count}"
+            f"📌 Diziler silindi: {tv_count}"
         )
     elif text == "hayır":
         await message.reply_text("❌ Silme işlemi iptal edildi.")
