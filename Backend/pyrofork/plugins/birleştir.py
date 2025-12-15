@@ -31,8 +31,11 @@ series_col = None
 
 async def init_db():
     global db, movie_col, series_col
-    if db:
+
+    # ❗ BURASI FIX
+    if db is not None:
         return
+
     db_names = await mongo_client.list_database_names()
     db = mongo_client[db_names[0]]
     movie_col = db["movie"]
@@ -43,7 +46,7 @@ tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
 API_SEMAPHORE = asyncio.Semaphore(12)
 
 # ================= GLOBAL =================
-awaiting_confirmation = {}  # user_id -> asyncio.Task
+awaiting_confirmation = {}   # user_id -> task
 flood_wait = 30
 last_command_time = {}
 
@@ -112,7 +115,7 @@ async def add_file(client: Client, message: Message):
     collection = series_col if season else movie_col
     await collection.insert_one(record)
 
-    await message.reply_text(f"✅ **{title}** başarıyla eklendi.")
+    await message.reply_text(f"✅ **{title}** eklendi.")
 
 # ============================================================
 # /SIL (ONAYLI)
@@ -125,7 +128,7 @@ async def request_delete(client: Client, message: Message):
         "⚠️ **TÜM VERİLER SİLİNECEK**\n\n"
         "Onaylamak için **Evet**\n"
         "İptal için **Hayır** yazın.\n\n"
-        "⏱ 60 saniye içinde cevap vermezsen işlem iptal edilir."
+        "⏱ 60 saniye süreniz var."
     )
 
     if user_id in awaiting_confirmation:
@@ -135,7 +138,7 @@ async def request_delete(client: Client, message: Message):
         await asyncio.sleep(60)
         if user_id in awaiting_confirmation:
             awaiting_confirmation.pop(user_id, None)
-            await message.reply_text("⏰ Süre doldu. Silme işlemi iptal edildi.")
+            await message.reply_text("⏰ Süre doldu. İşlem iptal edildi.")
 
     awaiting_confirmation[user_id] = asyncio.create_task(timeout())
 
@@ -165,7 +168,7 @@ async def handle_delete_confirmation(client: Client, message: Message):
         )
 
     elif text == "hayır":
-        await message.reply_text("❌ Silme işlemi iptal edildi.")
+        await message.reply_text("❌ Silme iptal edildi.")
 
 # ============================================================
 # /VINDIR
@@ -190,7 +193,11 @@ async def download_collections(client: Client, message: Message):
             await message.reply_text("⚠️ Koleksiyonlar boş.")
             return
 
-        data = {"movie": movie_data, "tv": tv_data}
+        data = {
+            "movie": movie_data,
+            "tv": tv_data
+        }
+
         file_path = "/tmp/dizi_ve_film_veritabani.json"
 
         with open(file_path, "w", encoding="utf-8") as f:
