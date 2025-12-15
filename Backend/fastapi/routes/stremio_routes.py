@@ -92,7 +92,7 @@ def format_stream_details(filename: str, quality: str, size: str) -> tuple[str, 
     try:
         parsed = PTN.parse(filename)
     except Exception:
-        return (f"Telegram {quality}", f"📁 {filename}\n💾 {size}")
+        return (f"{quality}", f"📁 {filename}\n💾 {size}")
 
     codec_parts = []
     if parsed.get("codec"):
@@ -108,7 +108,7 @@ def format_stream_details(filename: str, quality: str, size: str) -> tuple[str, 
 
     resolution = parsed.get("resolution", quality)
     quality_type = parsed.get("quality", "")
-    stream_name = f"Telegram {resolution} {quality_type}".strip()
+    stream_name = f"{resolution} {quality_type}".strip()
 
     stream_title_parts = [
         f"📁 {filename}",
