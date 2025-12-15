@@ -81,7 +81,7 @@ async def add_file(client: Client, message: Message):
             "episode": episode,
             "year": year,
             "quality": quality,
-            "url": url,
+            "id": url,
             "tmdb_id": getattr(meta, "id", None) if meta else None,
             "description": getattr(meta, "overview", "") if meta else "",
         }
