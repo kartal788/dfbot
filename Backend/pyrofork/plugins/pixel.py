@@ -1,15 +1,16 @@
 import os
 import requests
+import base64
 from time import time
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from dotenv import load_dotenv
 from Backend.helper.custom_filter import CustomFilters
-import base64
 
 load_dotenv()
 
 PIXELDRAIN_API_KEY = os.getenv("PIXELDRAIN")
+
 FLOOD_WAIT = 30
 last_command_time = {}
 
@@ -24,13 +25,13 @@ async def pixeldrain_stats(client: Client, message: Message):
     last_command_time[user_id] = now
 
     if not PIXELDRAIN_API_KEY:
-        await message.reply_text("PIXELDRAIN API key bulunamadı (.env).")
+        await message.reply_text("PIXELDRAIN API key bulunamadı.")
         return
 
     try:
-        basic_auth = base64.b64encode(f":{PIXELDRAIN_API_KEY}".encode()).decode()
+        auth = base64.b64encode(f":{PIXELDRAIN_API_KEY}".encode()).decode()
         headers = {
-            "Authorization": f"Basic {basic_auth}",
+            "Authorization": f"Basic {auth}",
             "User-Agent": "PyrogramBot"
         }
 
@@ -41,15 +42,22 @@ async def pixeldrain_stats(client: Client, message: Message):
         )
 
         if response.status_code != 200:
-            await message.reply_text(
-                f"API Hatası\nHTTP Kod: {response.status_code}"
-            )
+            await message.reply_text(f"API Hatası\nHTTP Kod: {response.status_code}")
             return
 
-        files = response.json()
+        data = response.json()
 
-        count = len(files) if isinstance(files, list) else "N/A"
-        text = f"Toplam dosya sayısı: {count}"
+        total_files = data.get("total", 0)
+        page = data.get("page", 1)
+        files_on_page = len(data.get("files", []))
+
+        text = (
+            "PixelDrain Bilgileri\n\n"
+            f"Toplam Dosya Sayısı: {total_files}\n"
+            f"Bu Sayfadaki Dosya: {files_on_page}\n"
+            f"Sayfa: {page}"
+        )
+
         await message.reply_text(text)
 
     except Exception as e:
