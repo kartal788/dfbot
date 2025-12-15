@@ -1,7 +1,8 @@
 import os
 import json
-import asyncio
 import time
+import asyncio
+import tempfile
 import PTN
 
 from pyrogram import Client, filters
@@ -31,8 +32,6 @@ series_col = None
 
 async def init_db():
     global db, movie_col, series_col
-
-    # ❗ BURASI FIX
     if db is not None:
         return
 
@@ -46,9 +45,9 @@ tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
 API_SEMAPHORE = asyncio.Semaphore(12)
 
 # ================= GLOBAL =================
-awaiting_confirmation = {}   # user_id -> task
-flood_wait = 30
+awaiting_confirmation = {}
 last_command_time = {}
+flood_wait = 30
 
 # ============================================================
 # /EKLE
@@ -198,10 +197,14 @@ async def download_collections(client: Client, message: Message):
             "tv": tv_data
         }
 
-        file_path = "/tmp/dizi_ve_film_veritabani.json"
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8"
+        ) as tmp:
+            json.dump(data, tmp, ensure_ascii=False, indent=2, default=str)
+            file_path = tmp.name
 
         await client.send_document(
             chat_id=message.chat.id,
