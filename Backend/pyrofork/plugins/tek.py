@@ -15,7 +15,7 @@ db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip()
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
 
-MONGO_URL = db_urls[1]  # İkinci database'e bağlanacak
+MONGO_URL = db_urls[1]  # İkinci database
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -25,10 +25,14 @@ if not TMDB_API:
 # ----------------- MongoDB -----------------
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
+movie_col = db["movie"]
+series_col = db["tv"]
 
 async def init_db():
-    global db
+    global db, movie_col, series_col
     db = client[DB_NAME]
+    movie_col = db["movie"]
+    series_col = db["tv"]
 
 # ----------------- TMDb -----------------
 tmdb = aioTMDb(key=TMDB_API, language="en-US", region="US")
@@ -64,7 +68,6 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
     release_year = get_year(release_date)
     genres = [g.name for g in safe_getattr(details, "genres", [])]
     cast = [c.name for c in safe_getattr(details, "cast", [])[:5]]
-    poster_id = safe_getattr(metadata, "imdb_id", "")
     poster = safe_getattr(metadata, "poster_path", "")
     backdrop = safe_getattr(metadata, "backdrop_path", "")
     logo = safe_getattr(metadata, "logo", "")
@@ -75,15 +78,14 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
-            "db_index": 1,
             "title": title,
             "genres": genres,
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://images.metahub.space/poster/small/{poster_id}/img",
-            "backdrop": f"https://images.metahub.space/background/medium/{poster_id}/img",
-            "logo": f"https://images.metahub.space/logo/medium/{poster_id}/img",
+            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
+            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
             "cast": cast,
             "runtime": runtime,
             "media_type": "movie",
@@ -101,15 +103,14 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
-            "db_index": 1,
             "title": title,
             "genres": genres,
             "description": safe_getattr(metadata, "overview", ""),
             "rating": safe_getattr(metadata, "vote_average", 0),
             "release_year": release_year,
-            "poster": f"https://images.metahub.space/poster/small/{poster_id}/img",
-            "backdrop": f"https://images.metahub.space/background/medium/{poster_id}/img",
-            "logo": f"https://images.metahub.space/logo/medium/{poster_id}/img",
+            "poster": f"https://image.tmdb.org/t/p/w500{poster}",
+            "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
+            "logo": f"https://image.tmdb.org/t/p/w300{logo}",
             "cast": cast,
             "runtime": runtime,
             "media_type": "tv",
@@ -161,9 +162,11 @@ async def add_file(client: Client, message: Message):
     async with API_SEMAPHORE:
         if season and episode:
             search_result = await tmdb.search().tv(query=title)
+            collection = series_col
             media_type = "tv"
         else:
             search_result = await tmdb.search().movies(query=title, year=year)
+            collection = movie_col
             media_type = "movie"
 
     if not search_result:
@@ -173,18 +176,7 @@ async def add_file(client: Client, message: Message):
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
-
-    # Tek doküman içinde movie ve tv listeleri
-    media_doc = await db["media"].find_one({"_id": 1})
-    if not media_doc:
-        media_doc = {"_id": 1, "movie": [], "tv": []}
-
-    if media_type == "movie":
-        media_doc["movie"].append(record)
-    else:
-        media_doc["tv"].append(record)
-
-    await db["media"].replace_one({"_id": 1}, media_doc, upsert=True)
+    await collection.insert_one(record)
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
 # ----------------- /sil Komutu -----------------
@@ -224,14 +216,14 @@ async def handle_confirmation(client: Client, message: Message):
     text = message.text.strip().lower()
     await init_db()
     if text == "evet":
-        media_doc = await db["media"].find_one({"_id": 1})
-        movie_count = len(media_doc["movie"]) if media_doc else 0
-        tv_count = len(media_doc["tv"]) if media_doc else 0
-        await db["media"].delete_one({"_id": 1})
+        movie_count = await movie_col.count_documents({})
+        series_count = await series_col.count_documents({})
+        await movie_col.delete_many({})
+        await series_col.delete_many({})
         await message.reply_text(
             f"✅ Silme işlemi tamamlandı.\n\n"
             f"📌 Filmler silindi: {movie_count}\n"
-            f"📌 Diziler silindi: {tv_count}"
+            f"📌 Diziler silindi: {series_count}"
         )
     elif text == "hayır":
         await message.reply_text("❌ Silme işlemi iptal edildi.")
