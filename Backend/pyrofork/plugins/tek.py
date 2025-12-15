@@ -15,7 +15,6 @@ DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
-
 MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
@@ -54,14 +53,27 @@ def get_year(date_obj):
     return None
 
 def pixeldrain_to_api(url: str) -> str:
+    """Pixeldrain /u/ linklerini API indirilebilir linkine çevirir."""
     match = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
     if match:
         file_id = match.group(1)
-        return f"https://pixeldrain.com/d/{file_id}"  # Direkt indirme linki
+        return f"https://pixeldrain.com/api/file/{file_id}"
     return url
 
-def safe_getattr(obj, attr, default=None):
-    return getattr(obj, attr, default) or default
+async def get_filename_from_url(url: str) -> str:
+    """URL'den dosya adını, mümkünse HTTP başlıklarından alır."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, allow_redirects=True) as resp:
+                content_disposition = resp.headers.get("Content-Disposition")
+                if content_disposition:
+                    match = re.search(r'filename="([^"]+)"', content_disposition)
+                    if match:
+                        return match.group(1)
+                return url.rstrip("/").split("/")[-1]
+    except Exception as e:
+        print(f"Dosya adı alınamadı: {e}")
+        return "UNKNOWN"
 
 async def get_file_size_from_url(url: str) -> str:
     """HTTP HEAD isteği ile dosya boyutunu alır."""
@@ -82,6 +94,9 @@ async def get_file_size_from_url(url: str) -> str:
     except Exception as e:
         print(f"Dosya boyutu alınamadı: {e}")
     return "UNKNOWN"
+
+def safe_getattr(obj, attr, default=None):
+    return getattr(obj, attr, default) or default
 
 def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
     title = safe_getattr(metadata, "title", safe_getattr(metadata, "name", filename))
@@ -122,7 +137,6 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
     else:  # TV series
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
-
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
@@ -160,12 +174,17 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def add_file(client: Client, message: Message):
     await init_db()
-    if len(message.command) < 3:
-        await message.reply_text("Kullanım: /ekle <URL> <DosyaAdı>")
+    if len(message.command) < 2:
+        await message.reply_text("Kullanım: /ekle <URL> <DosyaAdı (opsiyonel)>")
         return
 
     url = pixeldrain_to_api(message.command[1])
-    filename = " ".join(message.command[2:])
+    # Eğer kullanıcı dosya adı vermediyse, URL'den al
+    if len(message.command) > 2:
+        filename = " ".join(message.command[2:])
+    else:
+        filename = await get_filename_from_url(url)
+
     try:
         parsed = PTN.parse(filename)
     except Exception as e:
@@ -199,7 +218,6 @@ async def add_file(client: Client, message: Message):
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
 
-    # Dosya boyutunu linkten al
     size = await get_file_size_from_url(url)
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
     if media_type == "movie":
