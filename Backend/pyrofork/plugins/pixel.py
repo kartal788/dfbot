@@ -20,6 +20,9 @@ CMD_FLOOD_WAIT = 5
 last_command_time = {}
 delete_waiting = {}  # user_id: timestamp
 
+
+# ---------------- UTIL ----------------
+
 def get_headers():
     auth = base64.b64encode(f":{PIXELDRAIN_API_KEY}".encode()).decode()
     return {
@@ -33,25 +36,39 @@ def human_size(size):
             return f"{size:.2f} {unit}"
         size /= 1024
 
+
+# ---------------- PIXELDRAIN FILE FETCH (FIXED) ----------------
+
 def fetch_all_files_safe(max_pages=100):
     page = 1
-    all_files = []
+    files_by_id = {}  # 🔥 id -> file (tekilleştirme)
+
     while page <= max_pages:
         r = requests.get(
             f"{API_BASE}/user/files?page={page}",
             headers=get_headers(),
             timeout=15
         )
+
         if r.status_code != 200:
             break
 
-        files = r.json().get("files", [])
+        data = r.json()
+        files = data.get("files", [])
         if not files:
             break
 
-        all_files.extend(files)
+        for f in files:
+            file_id = f.get("id")
+            if file_id:
+                files_by_id[file_id] = f  # aynı ID tekrar gelirse overwrite eder
+
         page += 1
-    return all_files
+
+    return list(files_by_id.values())
+
+
+# ---------------- SAFE TELEGRAM ACTIONS ----------------
 
 async def safe_reply(message: Message, text: str):
     try:
@@ -67,7 +84,8 @@ async def safe_edit(msg: Message, text: str):
         await asyncio.sleep(e.value)
         await msg.edit_text(text)
 
-# ---------------- PIXELDRAIN KOMUT ----------------
+
+# ---------------- PIXELDRAIN COMMAND ----------------
 
 @Client.on_message(filters.command("pixeldrain") & filters.private & CustomFilters.owner)
 async def pixeldrain_handler(client: Client, message: Message):
@@ -86,15 +104,14 @@ async def pixeldrain_handler(client: Client, message: Message):
     args = message.command[1:]
     status = await safe_reply(message, "İşlem başlatıldı...")
 
-    # 🔥 /pixeldrain sil → ONAY İSTE
+    # 🔥 /pixeldrain sil
     if args and args[0].lower() == "sil":
         delete_waiting[user_id] = time()
-
         await safe_edit(
             status,
             "⚠️ **TÜM PixelDrain dosyaları silinecek!**\n\n"
             "Devam etmek için **EVET** yaz\n"
-            "İptal etmek için **HAYIR** yaz\n\n"
+            "İptal için **HAYIR** yaz\n\n"
             "⏱️ 60 saniye içinde cevap verilmezse iptal edilir."
         )
         return
@@ -117,7 +134,8 @@ async def pixeldrain_handler(client: Client, message: Message):
         await safe_edit(status, "❌ Hata oluştu.")
         print("PixelDrain hata:", e)
 
-# ---------------- EVET / HAYIR CEVAPLARI ----------------
+
+# ---------------- EVET / HAYIR CONFIRM ----------------
 
 @Client.on_message(
     filters.private
@@ -132,19 +150,16 @@ async def pixeldrain_confirm_message(client: Client, message: Message):
     if user_id not in delete_waiting:
         return
 
-    # ⏱️ Süre doldu mu?
     if time() - delete_waiting[user_id] > 60:
         delete_waiting.pop(user_id, None)
         await safe_reply(message, "⏱️ Süre doldu. Silme iptal edildi.")
         return
 
-    # ❌ HAYIR
     if text == "HAYIR":
         delete_waiting.pop(user_id, None)
-        await safe_reply(message, "❌ Silme işlemi iptal edildi.")
+        await safe_reply(message, "❌ Silme iptal edildi.")
         return
 
-    # ✅ EVET
     if text == "EVET":
         delete_waiting.pop(user_id, None)
         status = await safe_reply(message, "🗑️ Dosyalar siliniyor...")
