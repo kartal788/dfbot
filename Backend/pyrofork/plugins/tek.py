@@ -7,7 +7,6 @@ from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
 from themoviedb import aioTMDb
 import PTN
-from Backend.helper.encrypt import encode_string
 from Backend.helper.custom_filter import CustomFilters
 
 # ----------------- ENV -----------------
@@ -15,8 +14,7 @@ DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip() and u.strip().startswith("mongodb+srv")]
 if len(db_urls) < 2:
     raise Exception("İkinci DATABASE URL bulunamadı!")
-
-MONGO_URL = db_urls[1]  # İkinci database
+MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
@@ -61,7 +59,6 @@ def pixeldrain_to_api(url: str) -> str:
     return url
 
 def safe_getattr(obj, attr, default=None):
-    """Objeden güvenli şekilde attribute alır, yoksa default döner."""
     return getattr(obj, attr, default) or default
 
 def build_media_record(metadata, details, filename, url, quality, media_type, season=None, episode=None):
@@ -72,7 +69,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
     cast = [c.name for c in safe_getattr(details, "cast", [])[:5]]
     poster = safe_getattr(metadata, "poster_path", "")
     backdrop = safe_getattr(metadata, "backdrop_path", "")
-    logo = safe_getattr(metadata, "logo", "")
+    logo = safe_getattr(metadata, "logo_path", "")
 
     if media_type == "movie":
         runtime_val = safe_getattr(details, "runtime")
@@ -98,12 +95,24 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
                 "id": url,
                 "name": filename,
                 "size": "UNKNOWN"
-            }],
+            }]
         }
-    else:  # TV series
+    else:
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
-
+        episode_data = {
+            "episode_number": episode,
+            "title": filename,
+            "overview": safe_getattr(metadata, "overview", ""),
+            "released": safe_getattr(metadata, "first_air_date", ""),
+            "episode_backdrop": f"https://image.tmdb.org/t/p/w780{backdrop}",
+            "telegram": [{
+                "quality": quality,
+                "id": url,
+                "name": filename,
+                "size": "UNKNOWN"
+            }]
+        }
         record = {
             "tmdb_id": metadata.id,
             "imdb_id": safe_getattr(metadata, "imdb_id", ""),
@@ -122,17 +131,7 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
             "updated_on": str(datetime.utcnow()),
             "seasons": [{
                 "season_number": season,
-                "episodes": [{
-                    "episode_number": episode,
-                    "title": filename,
-                    "overview": safe_getattr(metadata, "overview", ""),
-                    "telegram": [{
-                        "quality": quality,
-                        "id": url,
-                        "name": filename,
-                        "size": "UNKNOWN"
-                    }]
-                }]
+                "episodes": [episode_data]
             }]
         }
     return record
@@ -181,6 +180,24 @@ async def add_file(client: Client, message: Message):
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
+
+    # Eğer dizi ve sezon zaten varsa, mevcut sezona ekle
+    if media_type == "tv" and season and episode:
+        existing = await collection.find_one({"tmdb_id": metadata.id})
+        if existing:
+            seasons = existing.get("seasons", [])
+            for s in seasons:
+                if s["season_number"] == season:
+                    s["episodes"].append(record["seasons"][0]["episodes"][0])
+                    await collection.update_one({"_id": existing["_id"]}, {"$set": {"seasons": seasons, "updated_on": str(datetime.utcnow())}})
+                    await message.reply_text(f"✅ {title} S{season}E{episode} başarıyla eklendi.")
+                    return
+            # Yeni sezon ekle
+            seasons.append(record["seasons"][0])
+            await collection.update_one({"_id": existing["_id"]}, {"$set": {"seasons": seasons, "updated_on": str(datetime.utcnow())}})
+            await message.reply_text(f"✅ {title} S{season} yeni sezon olarak eklendi.")
+            return
+
     await collection.insert_one(record)
     await message.reply_text(f"✅ {title} başarıyla eklendi.")
 
