@@ -73,13 +73,15 @@ async def auto_update_status(msg, get_text, stop_event):
             pass
         await asyncio.sleep(UPDATE_INTERVAL)
 
-def emoji_summary(total_files, total_size, elapsed, speed):
-    return (
-        "📊 **PixelDrain Özeti**\n\n"
-        f"📁 Dosya Sayısı : {total_files}\n"
-        f"💾 Toplam Boyut : {human_size(total_size)}\n"
-        f"⏱️ Geçen Süre  : {format_duration(elapsed)}\n"
-        f"🚀 Ortalama Hız: {speed:.2f} dosya/sn"
+def format_file_list(files):
+    """
+    files = [{"name": str, "size": int}]
+    alfabetik sıralı + numaralı + boyutlu
+    """
+    files = sorted(files, key=lambda x: x["name"].lower())
+    return "\n".join(
+        f"{i+1}. {f['name']} ({human_size(f['size'])})"
+        for i, f in enumerate(files)
     )
 
 # ===================== PIXELDRAIN API =====================
@@ -120,23 +122,17 @@ async def pixeldrain_delete_all(client: Client, message: Message):
 
     deleted = 0
     total = 0
-    last_files = []
+    deleted_files = []
 
     def progress_text():
         elapsed = int(time() - start_time)
-        speed = deleted / elapsed if elapsed > 0 else 0
-        eta = int((total - deleted) / speed) if speed > 0 else -1
-
+        eta = int((total - deleted) / (deleted / elapsed)) if deleted > 0 else -1
         return (
-            "🔄 **PixelDrain İşlem Durumu**\n\n"
+            "🔄 **PixelDrain Silme Durumu**\n\n"
             f"⏱️ Geçen Süre  : {format_duration(elapsed)}\n"
             f"📊 İlerleme    : {progress_bar(deleted, total)}\n"
-            f"📁 İşlenen     : {deleted} / {total}\n\n"
-            f"🚀 Hız         : {speed:.2f} dosya/sn\n"
-            f"⏳ Kalan Süre  : {format_duration(eta)}\n\n"
-            "📄 Son Dosyalar:\n" +
-            "\n".join(f"• {n}" for n in last_files[-5:]) +
-            ("\n• (henüz yok)" if not last_files else "")
+            f"📁 İşlenen     : {deleted} / {total}\n"
+            f"⏳ Kalan Süre  : {format_duration(eta)}"
         )
 
     updater = asyncio.create_task(
@@ -161,19 +157,41 @@ async def pixeldrain_delete_all(client: Client, message: Message):
                 timeout=10
             )
             deleted += 1
-            last_files.append(f.get("name", "isimsiz"))
+            deleted_files.append({
+                "name": f.get("name", "isimsiz"),
+                "size": f.get("size", 0)
+            })
             await asyncio.sleep(0.3)
 
         stop_event.set()
         updater.cancel()
-
         elapsed = int(time() - start_time)
-        speed = deleted / elapsed if elapsed > 0 else 0
 
-        await safe_edit(
-            status,
-            emoji_summary(deleted, 0, elapsed, speed)
-        )
+        if len(deleted_files) <= 10:
+            await safe_edit(
+                status,
+                "🧹 **PixelDrain Silme Özeti**\n\n"
+                f"📁 Silinen Dosya : {deleted}\n"
+                f"⏱️ Geçen Süre   : {format_duration(elapsed)}\n\n"
+                "📄 **Silinen Dosyalar:**\n" +
+                format_file_list(deleted_files)
+            )
+        else:
+            path = "silinen_dosyalar.txt"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(format_file_list(deleted_files))
+
+            await client.send_document(
+                message.chat.id,
+                path,
+                caption=(
+                    "🧹 **PixelDrain Silme Özeti**\n\n"
+                    f"📁 Silinen Dosya : {deleted}\n"
+                    f"⏱️ Geçen Süre   : {format_duration(elapsed)}"
+                )
+            )
+            await status.delete()
+            os.remove(path)
 
     except Exception as e:
         stop_event.set()
@@ -189,39 +207,55 @@ async def pixeldrain_list(client: Client, message: Message):
 
     stop_event = asyncio.Event()
     start_time = time()
-    files = []
-
-    def progress_text():
-        elapsed = int(time() - start_time)
-        speed = len(files) / elapsed if elapsed > 0 else 0
-        size = sum(f.get("size", 0) for f in files)
-
-        return (
-            "🔄 **PixelDrain Listeleme**\n\n"
-            f"⏱️ Geçen Süre  : {format_duration(elapsed)}\n"
-            f"📁 Dosya      : {len(files)}\n"
-            f"💾 Boyut      : {human_size(size)}\n"
-            f"🚀 Hız        : {speed:.2f} dosya/sn"
-        )
 
     updater = asyncio.create_task(
-        auto_update_status(status, progress_text, stop_event)
+        auto_update_status(
+            status,
+            lambda: "🔄 **PixelDrain Listeleme Devam Ediyor...**",
+            stop_event
+        )
     )
 
     try:
         files = await asyncio.to_thread(fetch_all_files_safe)
-        total_bytes = sum(f.get("size", 0) for f in files)
+        elapsed = int(time() - start_time)
+
+        file_data = [
+            {"name": f.get("name", "isimsiz"), "size": f.get("size", 0)}
+            for f in files
+        ]
+        total_bytes = sum(f["size"] for f in file_data)
 
         stop_event.set()
         updater.cancel()
 
-        elapsed = int(time() - start_time)
-        speed = len(files) / elapsed if elapsed > 0 else 0
+        if len(file_data) <= 10:
+            await safe_edit(
+                status,
+                "📊 **PixelDrain Özeti**\n\n"
+                f"📁 Dosya Sayısı : {len(file_data)}\n"
+                f"💾 Toplam Boyut : {human_size(total_bytes)}\n"
+                f"⏱️ Geçen Süre  : {format_duration(elapsed)}\n\n"
+                "📄 **Dosyalar:**\n" +
+                format_file_list(file_data)
+            )
+        else:
+            path = "dosyalar.txt"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(format_file_list(file_data))
 
-        await safe_edit(
-            status,
-            emoji_summary(len(files), total_bytes, elapsed, speed)
-        )
+            await client.send_document(
+                message.chat.id,
+                path,
+                caption=(
+                    "📊 **PixelDrain Özeti**\n\n"
+                    f"📁 Dosya Sayısı : {len(file_data)}\n"
+                    f"💾 Toplam Boyut : {human_size(total_bytes)}\n"
+                    f"⏱️ Geçen Süre  : {format_duration(elapsed)}"
+                )
+            )
+            await status.delete()
+            os.remove(path)
 
     except Exception as e:
         stop_event.set()
