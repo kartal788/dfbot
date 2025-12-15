@@ -20,7 +20,7 @@ from Backend.helper.custom_filter import CustomFilters
 # ---------------- ENV ----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in DATABASE_RAW.split(",") if u.strip().startswith("mongodb")]
-MONGO_URL = db_urls[0]
+MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
 TMDB_API = os.getenv("TMDB_API", "")
