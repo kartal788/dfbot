@@ -7,7 +7,6 @@ from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
 from themoviedb import aioTMDb
 import PTN
-from Backend.helper.encrypt import encode_string
 from Backend.helper.custom_filter import CustomFilters
 
 # ----------------- ENV -----------------
@@ -103,7 +102,6 @@ def build_media_record(metadata, details, filename, url, quality, media_type, se
         episode_runtime_list = safe_getattr(details, "episode_run_time", [])
         runtime = f"{episode_runtime_list[0]} min" if episode_runtime_list else "UNKNOWN"
 
-        # Bölüm posteri ve yayın tarihi
         episode_release_date = safe_getattr(metadata, "air_date", None)
         episode_backdrop = safe_getattr(metadata, "still_path", "")
 
@@ -181,8 +179,13 @@ async def add_file(client: Client, message: Message):
 
             show_metadata = search_result[0]
             show_details = await tmdb.tv(show_metadata.id).details()
-            # Düzeltilmiş bölüm verisi alma
-            episode_metadata = await tmdb.tv_episode(show_metadata.id, season, episode).details()
+            episode_metadata = await tmdb.tv(show_metadata.id).episode(season, episode).details()
+
+            # Tekrar eklemeyi önleme
+            exists = await collection.find_one({"tmdb_id": episode_metadata.id})
+            if exists:
+                await message.reply_text(f"{title} - S{season}E{episode} zaten mevcut.")
+                return
 
             record = build_media_record(
                 metadata=episode_metadata,
@@ -194,7 +197,6 @@ async def add_file(client: Client, message: Message):
                 season=season,
                 episode=episode
             )
-
         else:  # Film
             search_result = await tmdb.search().movies(query=title, year=year)
             collection = movie_col
@@ -206,6 +208,12 @@ async def add_file(client: Client, message: Message):
 
             metadata = search_result[0]
             details = await tmdb.movie(metadata.id).details()
+
+            exists = await collection.find_one({"tmdb_id": metadata.id})
+            if exists:
+                await message.reply_text(f"{title} zaten mevcut.")
+                return
+
             record = build_media_record(
                 metadata=metadata,
                 details=details,
