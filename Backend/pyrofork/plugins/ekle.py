@@ -1,10 +1,12 @@
-from pyrogram import Client, filters
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
+# ekle.py
 import json
 import asyncio
+from pyrogram import Client, filters
+from Backend.helper.custom_filter import CustomFilters
+from motor.motor_asyncio import AsyncIOMotorClient
+import os
 
-# ------------ ENV'DEN DATABASE AL ------------
+# ------------ SADECE ENV'DEN DATABASE AL ------------
 db_raw = os.getenv("DATABASE", "")
 db_urls = [u.strip() for u in db_raw.split(",") if u.strip()]
 
@@ -12,8 +14,9 @@ if len(db_urls) < 2:
     raise Exception("İkinci DATABASE bulunamadı!")
 
 MONGO_URL = db_urls[1]
-client_db = AsyncIOMotorClient(MONGO_URL)
 
+# ------------ MONGO BAĞLANTISI ------------
+client_db = AsyncIOMotorClient(MONGO_URL)
 db = None
 movie_col = None
 series_col = None
@@ -21,53 +24,61 @@ series_col = None
 async def init_db():
     global db, movie_col, series_col
     db_names = await client_db.list_database_names()
-    if not db_names:
-        raise Exception("Hiç DB bulunamadı!")
     db = client_db[db_names[0]]
     movie_col = db["movie"]
     series_col = db["tv"]
 
 # ------------ /ekle Komutu ------------
-@Client.on_message(filters.command("ekle") & filters.private)
-async def add_json_to_db(client, message):
+@Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
+async def add_json_file(client, message):
+    # Dosya yanıtı veya mesaj ile gönderilen dosya
+    document = message.reply_to_message.document if message.reply_to_message else message.document
+
+    if not document:
+        await message.reply_text("⚠️ Lütfen bir .json dosyası gönderin veya yanıtlayın.")
+        return
+
+    if not document.file_name.endswith(".json"):
+        await message.reply_text("❌ Dosya JSON formatında olmalı!")
+        return
+
+    # Dosyayı indir
+    file_path = await client.download_media(document)
+    
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        await message.reply_text(f"❌ JSON dosyası okunamadı: {e}")
+        return
+
+    # DB'yi başlat
     await init_db()
 
-    try:
-        data = None
+    added_count = {"movie": 0, "tv": 0}
 
-        # 1️⃣ Dosya gönderilmişse
-        if message.document:
-            file_path = await message.download()
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+    # Liste veya tek obje kontrolü
+    items = data if isinstance(data, list) else [data] if isinstance(data, dict) else None
 
-        # 2️⃣ Inline JSON gönderilmişse
-        elif len(message.text.split()) > 1:
-            json_text = message.text.split(None, 1)[1]
-            data = json.loads(json_text)
+    if not items:
+        await message.reply_text("❌ JSON formatı doğru değil, obje veya liste olmalı.")
+        return
 
+    for item in items:
+        item_type = item.get("type", "").lower()
+        if item_type == "movie":
+            await movie_col.insert_one(item)
+            added_count["movie"] += 1
+        elif item_type in {"series", "tv"}:
+            await series_col.insert_one(item)
+            added_count["tv"] += 1
         else:
-            await message.reply_text("⚠️ JSON dosyası veya JSON string gönderin.")
-            return
+            # type alanı yoksa default olarak movie ekle
+            await movie_col.insert_one(item)
+            added_count["movie"] += 1
 
-        # 3️⃣ Verileri DB'ye ekle
-        movies_added = 0
-        for movie in data.get("movie", []):
-            movie["db_index"] = 1
-            await movie_col.insert_one(movie)
-            movies_added += 1
-
-        tv_added = 0
-        for tv in data.get("tv", []):
-            tv["db_index"] = 1
-            await series_col.insert_one(tv)
-            tv_added += 1
-
-        await message.reply_text(
-            f"✅ Veritabanına kaydedildi:\nFilmler: {movies_added}\nDiziler: {tv_added}"
-        )
-
-    except json.JSONDecodeError:
-        await message.reply_text("❌ Geçersiz JSON formatı!")
-    except Exception as e:
-        await message.reply_text(f"❌ Hata: {e}")
+    await message.reply_text(
+        f"✅ JSON verisi başarıyla veritabanına eklendi.\n"
+        f"📌 Filmler: {added_count['movie']}\n"
+        f"📌 Diziler: {added_count['tv']}"
+    )
