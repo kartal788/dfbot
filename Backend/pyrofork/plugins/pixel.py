@@ -12,7 +12,6 @@ from Backend.helper.custom_filter import CustomFilters
 load_dotenv()
 
 PIXELDRAIN_API_KEY = os.getenv("PIXELDRAIN")
-
 API_BASE = "https://pixeldrain.com/api"
 CMD_FLOOD_WAIT = 60
 last_command_time = {}
@@ -23,6 +22,12 @@ def get_headers():
         "Authorization": f"Basic {auth}",
         "User-Agent": "PyrogramBot"
     }
+
+def human_size(size):
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
 
 def fetch_all_files_safe(max_pages=100):
     page = 1
@@ -40,7 +45,6 @@ def fetch_all_files_safe(max_pages=100):
 
         data = r.json()
         files = data.get("files", [])
-
         if not files:
             break
 
@@ -64,11 +68,10 @@ async def safe_edit(msg: Message, text: str):
         await msg.edit_text(text)
 
 @Client.on_message(filters.command("pixeldrain") & filters.private & CustomFilters.owner)
-async def pixeldrain_stats(client: Client, message: Message):
+async def pixeldrain_handler(client: Client, message: Message):
     user_id = message.from_user.id
     now = time()
 
-    # Komut flood koruması
     if user_id in last_command_time and now - last_command_time[user_id] < CMD_FLOOD_WAIT:
         await safe_reply(message, "Lütfen biraz bekleyin.")
         return
@@ -78,66 +81,63 @@ async def pixeldrain_stats(client: Client, message: Message):
         await safe_reply(message, "PIXELDRAIN API key yok.")
         return
 
-    status = await safe_reply(message, "Veriler toplanıyor...")
+    args = message.command[1:]
+    status = await safe_reply(message, "Veriler alınıyor...")
 
     try:
         files = await asyncio.to_thread(fetch_all_files_safe)
 
-        total_files = len(files)
-        total_bytes = sum(f.get("size", 0) for f in files)
+        # /pixeldrain sil
+        if args and args[0].lower() == "sil":
+            deleted = 0
 
-        mb = total_bytes / (1024 * 1024)
-        gb = total_bytes / (1024 * 1024 * 1024)
-        daily_mb = mb / 30 if mb else 0
+            for f in files:
+                file_id = f.get("id")
+                if not file_id:
+                    continue
 
-        text = (
-            "PixelDrain Gerçek İstatistikler\n\n"
-            f"Toplam Dosya: {total_files}\n"
-            f"Toplam Boyut: {mb:.2f} MB ({gb:.2f} GB)\n"
-            f"Günlük Trafik Tahmini: {daily_mb:.2f} MB\n\n"
-            "Tüm dosyaları silmek için:\n"
-            "/pixeldrain_sil"
+                r = requests.delete(
+                    f"{API_BASE}/file/{file_id}",
+                    headers=get_headers(),
+                    timeout=10
+                )
+
+                if r.status_code == 200:
+                    deleted += 1
+
+                await asyncio.sleep(0.3)
+
+            await safe_edit(
+                status,
+                f"🗑️ Silme tamamlandı.\nSilinen dosya sayısı: {deleted}"
+            )
+            return
+
+        # /pixeldrain listeleme
+        total_bytes = 0
+        text = "📦 **PixelDrain Dosyalar**\n\n"
+
+        for i, f in enumerate(files, start=1):
+            name = f.get("name", "Bilinmiyor")
+            size = f.get("size", 0)
+            total_bytes += size
+
+            text += f"{i}. `{name}` — {human_size(size)}\n"
+
+            if len(text) > 3500:
+                text += "\n⚠️ Liste kısaltıldı."
+                break
+
+        text += (
+            "\n\n📊 **Toplam Kullanım**\n"
+            f"Dosya Sayısı: {len(files)}\n"
+            f"Toplam Boyut: {human_size(total_bytes)}\n\n"
+            "🗑️ Tüm dosyaları silmek için:\n"
+            "`/pixeldrain sil`"
         )
 
         await safe_edit(status, text)
 
     except Exception as e:
-        await safe_edit(status, "Hata oluştu.")
+        await safe_edit(status, "❌ Hata oluştu.")
         print("PixelDrain hata:", e)
-
-@Client.on_message(filters.command("pixeldrain_sil") & filters.private & CustomFilters.owner)
-async def pixeldrain_delete_all(client: Client, message: Message):
-    if not PIXELDRAIN_API_KEY:
-        await safe_reply(message, "PIXELDRAIN API key yok.")
-        return
-
-    status = await safe_reply(message, "Tüm dosyalar siliniyor...")
-
-    try:
-        files = await asyncio.to_thread(fetch_all_files_safe)
-        deleted = 0
-
-        for f in files:
-            file_id = f.get("id")
-            if not file_id:
-                continue
-
-            r = requests.delete(
-                f"{API_BASE}/file/{file_id}",
-                headers=get_headers(),
-                timeout=10
-            )
-
-            if r.status_code == 200:
-                deleted += 1
-
-            await asyncio.sleep(0.3)  # PixelDrain + Telegram rate limit
-
-        await safe_edit(
-            status,
-            f"Silme tamamlandı.\nSilinen dosya: {deleted}"
-        )
-
-    except Exception as e:
-        await safe_edit(status, "Silme sırasında hata oluştu.")
-        print("PixelDrain silme hata:", e)
