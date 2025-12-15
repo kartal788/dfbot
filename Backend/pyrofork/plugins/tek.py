@@ -6,7 +6,7 @@ import asyncio
 import PTN
 from Backend.logger import LOGGER
 from motor.motor_asyncio import AsyncIOMotorClient
-from your_metadata_module import metadata  # metadata fonksiyonun bulunduğu modül
+from Backend.helper.metadata.py import metadata  # metadata fonksiyonun bulunduğu modül
 
 # ----------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
