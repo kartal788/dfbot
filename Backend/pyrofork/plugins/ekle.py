@@ -1,8 +1,10 @@
 from pyrogram import Client, filters
 from Backend.helper.custom_filter import CustomFilters
+from Backend.helper.metadata import metadata
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
+import math
 
 # ------------ SADECE ENV'DEN DATABASE AL ------------
 db_raw = os.getenv("DATABASE", "")
@@ -22,7 +24,7 @@ series_col = None
 async def init_db():
     global db, movie_col, series_col
     if db is not None:
-        return  # zaten başlatıldıysa tekrar başlatma
+        return
     db_names = await client.list_database_names()
     db = client[db_names[0]]
     movie_col = db["movie"]
@@ -33,40 +35,86 @@ awaiting_confirmation = {}  # user_id -> asyncio.Task
 
 # ------------ /ekle Komutu ------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
-async def add_link(client, message):
+async def add_file_link(client, message):
     if len(message.command) < 2:
         return await message.reply_text("❌ Lütfen bir link girin. Örnek: /ekle <link>")
 
     link = message.command[1]
+
+    # Dosya adını linkten al
+    file_name = link.split("/")[-1]
+
     await init_db()
+    await message.reply_text(f"⏳ `{file_name}` için metadata çekiliyor...", quote=True)
 
-    updated_count = 0
+    try:
+        # metadata helper ile bilgileri çek
+        meta = await metadata(file_name, channel=message.chat.id, msg_id=message.message_id)
+        if not meta:
+            return await message.reply_text(f"❌ Metadata alınamadı: `{file_name}`")
 
-    # --- MOVIE Koleksiyonunu Güncelle ---
-    async for movie in movie_col.find({}):
-        updated = False
-        for telegram_item in movie.get("telegram", []):
-            if "id" in telegram_item:
-                telegram_item["id"] = link
-                updated = True
-        if updated:
-            await movie_col.update_one({"_id": movie["_id"]}, {"$set": movie})
-            updated_count += 1
+        # Telegram bilgisi ekle
+        size = "Unknown"
+        tg_item = {
+            "quality": meta.get("quality") or "Unknown",
+            "id": link,
+            "name": file_name,
+            "size": size
+        }
 
-    # --- TV Koleksiyonunu Güncelle ---
-    async for tv_show in series_col.find({}):
-        updated = False
-        for season in tv_show.get("seasons", []):
-            for episode in season.get("episodes", []):
-                for telegram_item in episode.get("telegram", []):
-                    if "id" in telegram_item:
-                        telegram_item["id"] = link
-                        updated = True
-        if updated:
-            await series_col.update_one({"_id": tv_show["_id"]}, {"$set": tv_show})
-            updated_count += 1
+        if meta.get("media_type") == "movie":
+            existing = await movie_col.find_one({"imdb_id": meta["imdb_id"]})
+            if existing:
+                existing_telegram = existing.get("telegram", [])
+                existing_telegram.append(tg_item)
+                await movie_col.update_one({"_id": existing["_id"]}, {"$set": {"telegram": existing_telegram}})
+                await message.reply_text(f"✅ Film zaten var, link telegram listesine eklendi: `{file_name}`")
+            else:
+                meta["telegram"] = [tg_item]
+                await movie_col.insert_one(meta)
+                await message.reply_text(f"✅ Film başarıyla eklendi: `{file_name}`")
 
-    await message.reply_text(f"✅ Link güncellendi. Toplam {updated_count} kayıtta id değiştirildi.")
+        elif meta.get("media_type") == "tv":
+            season_number = meta.get("season_number") or 1
+            episode_number = meta.get("episode_number") or 1
+
+            existing = await series_col.find_one({"imdb_id": meta["imdb_id"]})
+            if existing:
+                seasons = existing.get("seasons", [])
+                season_obj = next((s for s in seasons if s["season_number"] == season_number), None)
+                if not season_obj:
+                    season_obj = {"season_number": season_number, "episodes": []}
+                    seasons.append(season_obj)
+
+                episode_obj = next((e for e in season_obj["episodes"] if e["episode_number"] == episode_number), None)
+                if not episode_obj:
+                    episode_obj = {
+                        "episode_number": episode_number,
+                        "title": meta.get("episode_title"),
+                        "telegram": [tg_item]
+                    }
+                    season_obj["episodes"].append(episode_obj)
+                else:
+                    episode_obj["telegram"].append(tg_item)
+
+                await series_col.update_one({"_id": existing["_id"]}, {"$set": {"seasons": seasons}})
+                await message.reply_text(f"✅ Dizi zaten var, sezon/episode güncellendi: `{file_name}`")
+            else:
+                meta["seasons"] = [{
+                    "season_number": season_number,
+                    "episodes": [{
+                        "episode_number": episode_number,
+                        "title": meta.get("episode_title"),
+                        "telegram": [tg_item]
+                    }]
+                }]
+                await series_col.insert_one(meta)
+                await message.reply_text(f"✅ Dizi başarıyla eklendi: `{file_name}`")
+        else:
+            await message.reply_text(f"❌ Desteklenmeyen medya türü: `{file_name}`")
+
+    except Exception as e:
+        await message.reply_text(f"❌ Hata oluştu: `{str(e)}`")
 
 # ------------ /sil Komutu ------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
@@ -78,11 +126,9 @@ async def request_delete(client, message):
         "⏱ 60 saniye içinde cevap vermezsen işlem otomatik iptal edilir."
     )
 
-    # Eğer zaten bekliyorsa önceki timeout iptal et
     if user_id in awaiting_confirmation:
         awaiting_confirmation[user_id].cancel()
 
-    # 60 saniye sonra otomatik iptal
     async def timeout():
         await asyncio.sleep(60)
         if user_id in awaiting_confirmation:
@@ -101,7 +147,6 @@ async def handle_confirmation(client, message):
 
     text = message.text.strip().lower()
 
-    # Timeout'u iptal et
     awaiting_confirmation[user_id].cancel()
     awaiting_confirmation.pop(user_id, None)
 
@@ -120,6 +165,5 @@ async def handle_confirmation(client, message):
             f"📌 Filmler silindi: {movie_count}\n"
             f"📌 Diziler silindi: {series_count}"
         )
-
     elif text == "hayır":
         await message.reply_text("❌ Silme işlemi iptal edildi.")
