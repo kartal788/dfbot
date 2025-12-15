@@ -1,3 +1,16 @@
+import os
+import requests
+import base64
+import asyncio
+from time import time
+
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from pyrogram.errors import FloodWait
+
+from dotenv import load_dotenv
+from Backend.helper.custom_filter import CustomFilters
+
 @Client.on_message(filters.command("pixeldrain") & filters.private & CustomFilters.owner)
 async def pixeldrain_handler(client: Client, message: Message):
     if not PIXELDRAIN_API_KEY:
