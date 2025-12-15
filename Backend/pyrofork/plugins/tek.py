@@ -7,11 +7,9 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import MongoClient
 from themoviedb import aioTMDb
 import PTN
 from Backend.helper.custom_filter import CustomFilters
-from Backend.helper.encrypt import encode_string
 
 # ---------------- ENV -----------------
 DATABASE_RAW = os.getenv("DATABASE", "")
@@ -183,7 +181,7 @@ async def add_file(client: Client, message: Message):
     metadata = search_result[0]
     details = await (tmdb.tv(metadata.id).details() if media_type == "tv" else tmdb.movie(metadata.id).details())
     record = build_media_record(metadata, details, filename, url, quality, media_type, season, episode)
-    
+
     # Duplicate kontrol ve güncelleme
     await collection.update_one(
         {"tmdb_id": metadata.id},
@@ -246,16 +244,6 @@ async def handle_confirmation(client: Client, message: Message):
 flood_wait = 30  # saniye
 last_command_time = {}  # kullanıcı_id : zaman
 
-def export_collections_to_json(url):
-    client_sync = MongoClient(url)
-    db_name_list = client_sync.list_database_names()
-    if not db_name_list:
-        return None
-    db_sync = client_sync[db_name_list[0]]
-    movie_data = list(db_sync["movie"].find({}, {"_id": 0}))
-    tv_data = list(db_sync["tv"].find({}, {"_id": 0}))
-    return {"movie": movie_data, "tv": tv_data}
-
 @Client.on_message(filters.command("vindir") & filters.private & CustomFilters.owner)
 async def download_collections(client: Client, message: Message):
     user_id = message.from_user.id
@@ -266,11 +254,16 @@ async def download_collections(client: Client, message: Message):
     last_command_time[user_id] = now
 
     try:
-        combined_data = export_collections_to_json(MONGO_URL)
-        if combined_data is None:
+        await init_db()
+        movie_data = await movie_col.find({}, {"_id": 0}).to_list(length=None)
+        tv_data = await series_col.find({}, {"_id": 0}).to_list(length=None)
+        combined_data = {"movie": movie_data, "tv": tv_data}
+
+        if not combined_data["movie"] and not combined_data["tv"]:
             await message.reply_text("⚠️ Koleksiyonlar boş veya bulunamadı.")
             return
 
+        # Docker uyumlu temp path
         file_path = "/tmp/dizi_ve_film_veritabanı.json"
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(combined_data, f, ensure_ascii=False, indent=2, default=str)
