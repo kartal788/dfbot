@@ -6,7 +6,6 @@ from Backend import db, __version__
 import PTN
 from datetime import datetime, timezone, timedelta
 
-
 # --- Configuration ---
 BASE_URL = Telegram.BASE_URL
 ADDON_NAME = "Arşivim"
@@ -15,41 +14,31 @@ PAGE_SIZE = 15
 
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
 
+# --- Platforms ---
+PLATFORMS = {
+    "netflix": ["nf"],
+    "disney": ["dsnp", "disney"],
+    "amazon": ["amzn"],
+    "hbo": ["hbo", "hbomax", "blutv"]
+}
 
 # --- Genres ---
 GENRES = [
-    "Aile", "Aksiyon", "Animasyon", "Belgesel", "Bilim Kurgu",
-    "Biyografi", "Çocuklar", "Dram", "Fantastik", "Gerilim",
-    "Gizem", "Komedi", "Korku", "Macera", "Romantik", "Suç",
-    "Tarih", "Savaş"
+    "Aile", "Aksiyon", "Animasyon", "Belgesel",
+    "Bilim Kurgu", "Biyografi", "Çocuklar",
+    "Dram", "Fantastik", "Gerilim", "Gizem",
+    "Komedi", "Korku", "Macera", "Romantik",
+    "Savaş", "Spor", "Suç", "Tarih"
 ]
-
-
-# --- Platform Map ---
-PLATFORM_KEYWORDS = {
-    "nf": "Netflix",
-    "netflix": "Netflix",
-    "dsnp": "Disney",
-    "disney": "Disney",
-    "amzn": "Amazon",
-    "amazon": "Amazon",
-    "blutv": "HBO",
-    "hbo": "HBO",
-    "hbomax": "HBO",
-}
-
 
 # --- Helpers ---
 def detect_platform_from_name(name: str) -> Optional[str]:
-    try:
-        parsed = PTN.parse(name)
-    except Exception:
+    if not name:
         return None
-
-    text = name.lower()
-    for k, v in PLATFORM_KEYWORDS.items():
-        if k in text:
-            return v
+    lname = name.lower()
+    for platform, keys in PLATFORMS.items():
+        if any(k in lname for k in keys):
+            return platform
     return None
 
 
@@ -76,42 +65,12 @@ def convert_to_stremio_meta(item: dict) -> dict:
     }
 
 
-def format_stream_details(filename: str, quality: str, size: str, file_id: str):
-    try:
-        parsed = PTN.parse(filename)
-    except Exception:
-        return f"{quality}", f"{filename}\n{size}"
-
-    platform = detect_platform_from_name(filename)
-    platform_tag = f"[{platform}]" if platform else ""
-
-    resolution = parsed.get("resolution", quality)
-    codec = parsed.get("codec", "")
-    audio = parsed.get("audio", "")
-
-    name = f"{platform_tag} {resolution}".strip()
-    title = "\n".join(filter(None, [
-        f"📁 {filename}",
-        f"💾 {size}",
-        codec,
-        audio
-    ]))
-
-    return name, title
-
-
-def parse_size(size_str: str) -> float:
-    if not size_str:
-        return 0.0
-    size_str = size_str.lower().replace(" ", "")
-    try:
-        if "gb" in size_str:
-            return float(size_str.replace("gb", "")) * 1024
-        if "mb" in size_str:
-            return float(size_str.replace("mb", ""))
-    except ValueError:
-        pass
-    return 0.0
+def get_sort_from_category(cat: str):
+    if cat == "rating":
+        return [("rating", "desc")]
+    if cat == "released":
+        return [("release_year", "desc")]
+    return [("updated_on", "desc")]
 
 
 # --- Manifest ---
@@ -119,29 +78,22 @@ def parse_size(size_str: str) -> float:
 async def manifest():
     catalogs = []
 
-    for platform in ["Netflix", "Amazon", "Disney", "HBO"]:
-        catalogs.extend([
-            {
-                "type": "movie",
-                "id": f"{platform.lower()}_movies",
-                "name": f"{platform} Filmleri",
-                "extraSupported": ["sort", "skip"],
-                "extra": [{"name": "sort", "options": ["updated_on", "rating", "released"]}]
-            },
-            {
-                "type": "series",
-                "id": f"{platform.lower()}_series",
-                "name": f"{platform} Dizileri",
-                "extraSupported": ["sort", "skip"],
-                "extra": [{"name": "sort", "options": ["updated_on", "rating", "released"]}]
-            }
-        ])
+    for platform in PLATFORMS.keys():
+        for media_type in ["movie", "series"]:
+            for cat in ["updated", "rating", "released"]:
+                catalogs.append({
+                    "type": media_type,
+                    "id": f"{platform}_{media_type}_{cat}",
+                    "name": f"{platform.capitalize()} {'Filmleri' if media_type=='movie' else 'Dizileri'} ({cat})",
+                    "extra": [{"name": "skip"}],
+                    "extraSupported": ["skip"]
+                })
 
     return {
         "id": "telegram.media",
         "version": ADDON_VERSION,
         "name": ADDON_NAME,
-        "description": "Dizi ve film arşivim",
+        "description": "Platform bazlı film ve dizi arşivi",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
         "catalogs": catalogs
@@ -152,39 +104,37 @@ async def manifest():
 @router.get("/catalog/{media_type}/{id}/{extra:path}.json")
 @router.get("/catalog/{media_type}/{id}.json")
 async def catalog(media_type: str, id: str, extra: Optional[str] = None):
-    skip = 0
-    sort_key = "updated_on"
+    stremio_skip = 0
 
     if extra:
         for p in extra.replace("&", "/").split("/"):
             if p.startswith("skip="):
-                skip = int(p.replace("skip=", ""))
-            elif p.startswith("sort="):
-                sort_key = p.replace("sort=", "")
+                stremio_skip = int(p[5:] or 0)
 
-    page = (skip // PAGE_SIZE) + 1
+    page = (stremio_skip // PAGE_SIZE) + 1
 
-    platform = None
-    for p in ["netflix", "amazon", "disney", "hbo"]:
-        if id.startswith(p):
-            platform = p.capitalize()
+    try:
+        platform, _, category = id.split("_", 2)
+    except ValueError:
+        return {"metas": []}
 
-    sort = [(sort_key, "desc")]
+    sort = get_sort_from_category(category)
 
     if media_type == "movie":
-        data = await db.sort_movies(sort, page, PAGE_SIZE, None)
+        data = await db.sort_movies(sort, page, PAGE_SIZE)
         items = data.get("movies", [])
     else:
-        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, None)
+        data = await db.sort_tv_shows(sort, page, PAGE_SIZE)
         items = data.get("tv_shows", [])
 
-    if platform:
-        items = [
-            i for i in items
-            if any(platform.lower() in (g.lower()) for g in i.get("genres", []))
-        ]
+    filtered = []
+    for item in items:
+        for t in item.get("telegram", []):
+            if detect_platform_from_name(t.get("name", "")) == platform:
+                filtered.append(item)
+                break
 
-    return {"metas": [convert_to_stremio_meta(i) for i in items]}
+    return {"metas": [convert_to_stremio_meta(i) for i in filtered]}
 
 
 # --- Meta ---
@@ -223,6 +173,7 @@ async def meta(media_type: str, id: str):
 async def streams(media_type: str, id: str):
     parts = id.split(":")
     tmdb_id, db_index = map(int, parts[0].split("-"))
+
     season = int(parts[1]) if len(parts) > 1 else None
     episode = int(parts[2]) if len(parts) > 2 else None
 
@@ -238,19 +189,19 @@ async def streams(media_type: str, id: str):
         quality = q.get("quality", "HD")
         size = q.get("size", "")
 
-        name, title = format_stream_details(filename, quality, size, file_id)
+        platform = detect_platform_from_name(filename)
+        source = platform.capitalize() if platform else "Kaynak"
 
-        url = file_id if file_id.startswith("http") else f"{BASE_URL}/dl/{file_id}/video.mkv"
+        url = (
+            file_id
+            if file_id.startswith(("http://", "https://"))
+            else f"{BASE_URL}/dl/{file_id}/video.mkv"
+        )
 
         streams.append({
-            "name": name,
-            "title": title,
-            "url": url,
-            "_size": parse_size(size)
+            "name": f"{source} {quality}",
+            "title": f"📁 {filename}\n💾 {size}",
+            "url": url
         })
-
-    streams.sort(key=lambda s: s["_size"], reverse=True)
-    for s in streams:
-        s.pop("_size", None)
 
     return {"streams": streams}
