@@ -147,15 +147,21 @@ async def ekle(client: Client, message: Message):
 
     inputs = [(pixeldrain_to_api(p[0]), " ".join(p[1:]).strip() if len(p) > 1 else None) for p in pairs]
 
-    success, failed = [], []
+    success = []
+    failed = []  # (name, reason)
+
     msg = await message.reply_text("📥 İşlem başlatıldı...")
 
     for i, (raw, custom_name) in enumerate(inputs, start=1):
+        display_name = custom_name or raw
         try:
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
             title = parsed.get("title")
+            if not title:
+                raise Exception("Dosya isminden başlık çözümlenemedi")
+
             year = parsed.get("year")
             season = parsed.get("season")
             episode = parsed.get("episode")
@@ -176,7 +182,7 @@ async def ekle(client: Client, message: Message):
                     movie_count += 1
 
             if not results:
-                raise Exception("TMDB bulunamadı")
+                raise Exception("TMDB sonucu bulunamadı")
 
             meta = results[0]
             details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
@@ -197,8 +203,8 @@ async def ekle(client: Client, message: Message):
 
             success.append(display_name)
 
-        except Exception:
-            failed.append(display_name)
+        except Exception as e:
+            failed.append((display_name, str(e) or e.__class__.__name__))
 
         await msg.edit_text(f"🔄 {i}/{len(inputs)}\n✅ {len(success)} | ❌ {len(failed)}")
 
@@ -206,7 +212,10 @@ async def ekle(client: Client, message: Message):
     minutes, seconds = divmod(int(duration.total_seconds()), 60)
 
     success_list = "\n".join(f"• {x}" for x in success[:5]) or "• Yok"
-    failed_list = "\n".join(f"• {x}" for x in failed[:5]) or "• Yok"
+    failed_list = "\n".join(
+        f"• {name}\n   ↳ ❗ {reason}"
+        for name, reason in failed[:5]
+    ) or "• Yok"
 
     await msg.edit_text(
         f"📊 **İşlem Tamamlandı**\n\n"
@@ -220,7 +229,7 @@ async def ekle(client: Client, message: Message):
         f"🔗 Eklenen Link: {link_count}\n\n"
         f"⏱️ Süre: {minutes:02d}:{seconds:02d}\n\n"
         f"🟢 **Eklenenler:**\n{success_list}\n\n"
-        f"🔴 **Başarısız:**\n{failed_list}"
+        f"🔴 **Başarısız (Nedenleriyle):**\n{failed_list}"
     )
 
 # ----------------- /SİL -----------------
