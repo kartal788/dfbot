@@ -31,7 +31,7 @@ GENRES = [
 ]
 
 # -------------------------------------------------
-# PLATFORM ALGILAMA
+# PLATFORM ALGILAMA (DOSYA ADI)
 # -------------------------------------------------
 def detect_platforms(filename: str) -> list[str]:
     if not filename:
@@ -66,7 +66,7 @@ def convert_to_stremio_meta(item: dict) -> dict:
     }
 
 # -------------------------------------------------
-# MANIFEST (TEK SATIR PLATFORM)
+# MANIFEST
 # -------------------------------------------------
 @router.get("/manifest.json")
 async def manifest():
@@ -79,14 +79,8 @@ async def manifest():
                 "id": f"{platform.lower()}_{media_type}",
                 "name": f"{platform} {label}",
                 "extra": [
-                    {
-                        "name": "sort",
-                        "options": ["popular", "released"]
-                    },
-                    {
-                        "name": "genre",
-                        "options": GENRES
-                    }
+                    {"name": "sort", "options": ["popular", "released"]},
+                    {"name": "genre", "options": GENRES}
                 ],
                 "extraSupported": ["sort", "genre", "skip"]
             })
@@ -122,13 +116,12 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
 
     page = (skip // PAGE_SIZE) + 1
 
-    # Default sort
+    # Sort
     sort = [("updated_on", "desc")]
-
     if sort_mode == "popular":
         sort = [("rating", "desc")]
     elif sort_mode == "released":
-        sort = [("released" if media_type == "series" else "updated_on", "desc")]
+        sort = [("release_year", "desc")]
 
     parts = id.split("_")
     platform = parts[0].capitalize() if parts[0].capitalize() in PLATFORM_RULES else None
@@ -141,15 +134,12 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
         data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
         items = data.get("tv_shows", [])
 
-    # Platform filtre
+    # PLATFORM FİLTRE (GENRE ÜZERİNDEN)
     if platform:
-        filtered = []
-        for item in items:
-            for t in item.get("telegram", []):
-                if platform in detect_platforms(t.get("name", "")):
-                    filtered.append(item)
-                    break
-        items = filtered
+        items = [
+            item for item in items
+            if platform in item.get("genres", [])
+        ]
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
 
