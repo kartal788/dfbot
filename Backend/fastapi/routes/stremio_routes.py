@@ -1,13 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from typing import Optional
 from urllib.parse import unquote
 from Backend.config import Telegram
 from Backend import db, __version__
 import PTN
 from datetime import datetime, timezone, timedelta
+import re
 
 
-# --- Configuration ---
+# ---------------- CONFIG ----------------
 BASE_URL = Telegram.BASE_URL
 ADDON_NAME = "Arşivim"
 ADDON_VERSION = __version__
@@ -16,7 +17,7 @@ PAGE_SIZE = 15
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
 
 
-# --- Genres ---
+# ---------------- GENRES ----------------
 GENRES = [
     "Aile", "Aksiyon", "Aksiyon ve Macera", "Animasyon", "Belgesel",
     "Bilim Kurgu", "Bilim Kurgu ve Fantazi", "Biyografi", "Çocuklar",
@@ -29,87 +30,71 @@ GENRES = [
 ]
 
 
-# --- Helpers ---
+# ---------------- HELPERS ----------------
+def parse_size_to_mb(size: str) -> float:
+    if not size:
+        return 0
+    m = re.search(r"([\d.,]+)\s*(gb|mb)", size.lower())
+    if not m:
+        return 0
+    value = float(m.group(1).replace(",", "."))
+    return value * 1024 if m.group(2) == "gb" else value
+
+
+def get_source_priority(file_id: str) -> int:
+    return 1 if file_id.startswith(("http://", "https://")) else 0
+
+
+def get_resolution_priority(text: str) -> int:
+    mapping = {
+        "2160p": 2160, "4k": 2160,
+        "1440p": 1440,
+        "1080p": 1080,
+        "720p": 720,
+        "540p": 540,
+        "480p": 480,
+        "360p": 360,
+    }
+    text = text.lower()
+    for k, v in mapping.items():
+        if k in text:
+            return v
+    return 1
+
+
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
-    stremio_id = f"{item.get('tmdb_id')}-{item.get('db_index')}"
-
     return {
-        "id": stremio_id,
+        "id": f"{item.get('tmdb_id')}-{item.get('db_index')}",
         "type": media_type,
         "name": item.get("title"),
         "poster": item.get("poster") or "",
         "logo": item.get("logo") or "",
         "year": item.get("release_year"),
-        "releaseInfo": item.get("release_year"),
-        "imdb_id": item.get("imdb_id", ""),
-        "moviedb_id": item.get("tmdb_id", ""),
         "background": item.get("backdrop") or "",
         "genres": item.get("genres") or [],
         "imdbRating": item.get("rating") or "",
         "description": item.get("description") or "",
-        "cast": item.get("cast") or [],
-        "runtime": item.get("runtime") or "",
     }
 
 
-def format_stream_details(filename: str, quality: str, size: str, file_id: str) -> tuple[str, str]:
-    if file_id.startswith("http://") or file_id.startswith("https://"):
-        source_prefix = "Link"
-    else:
-        source_prefix = "Telegram"
+def format_stream_details(filename: str, quality: str, size: str, file_id: str):
+    source = "Link" if get_source_priority(file_id) else "Telegram"
 
     try:
         parsed = PTN.parse(filename)
+        resolution = parsed.get("resolution", quality)
+        quality_type = parsed.get("quality", "")
+        codec = parsed.get("codec", "")
     except Exception:
-        return (
-            f"{source_prefix} {quality}",
-            f"📁 {filename}\n💾 {size}"
-        )
+        return f"{source} {quality}", f"📁 {filename}\n💾 {size}"
 
-    codec_parts = []
-    if parsed.get("codec"):
-        codec_parts.append(f"🎥 {parsed['codec']}")
-    if parsed.get("bitDepth"):
-        codec_parts.append(f"🔟 {parsed['bitDepth']}bit")
-    if parsed.get("audio"):
-        codec_parts.append(f"🔊 {parsed['audio']}")
-    if parsed.get("encoder"):
-        codec_parts.append(f"👤 {parsed['encoder']}")
-
-    codec_info = " ".join(codec_parts)
-
-    resolution = parsed.get("resolution", quality)
-    quality_type = parsed.get("quality", "")
-
-    stream_name = f"{source_prefix} {resolution} {quality_type}".strip()
-
-    stream_title = "\n".join(
-        filter(None, [
-            f"📁 {filename}",
-            f"💾 {size}",
-            codec_info
-        ])
-    )
-
-    return stream_name, stream_title
+    name = f"{source} {resolution} {quality_type}".strip()
+    title = f"📁 {filename}\n💾 {size}\n🎥 {codec}" if codec else f"📁 {filename}\n💾 {size}"
+    return name, title
 
 
-def get_resolution_priority(name: str) -> int:
-    mapping = {
-        "2160p": 2160, "4k": 2160,
-        "1080p": 1080,
-        "720p": 720,
-        "480p": 480,
-        "360p": 360,
-    }
-    for k, v in mapping.items():
-        if k in name.lower():
-            return v
-    return 1
-
-
-# --- Manifest ---
+# ---------------- MANIFEST ----------------
 @router.get("/manifest.json")
 async def manifest():
     return {
@@ -119,108 +104,15 @@ async def manifest():
         "description": "Dizi ve film arşivim.",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
-        "catalogs": [
-            {
-                "type": "movie",
-                "id": "latest_movies",
-                "name": "Latest",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "movie",
-                "id": "top_movies",
-                "name": "Popular",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "series",
-                "id": "latest_series",
-                "name": "Latest",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            },
-            {
-                "type": "series",
-                "id": "top_series",
-                "name": "Popular",
-                "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
-                "extraSupported": ["genre", "skip"]
-            }
-        ],
+        "catalogs": [],
     }
 
 
-# --- Catalog ---
-@router.get("/catalog/{media_type}/{id}/{extra:path}.json")
-@router.get("/catalog/{media_type}/{id}.json")
-async def catalog(media_type: str, id: str, extra: Optional[str] = None):
-    stremio_skip = 0
-    genre = None
-
-    if extra:
-        for p in extra.replace("&", "/").split("/"):
-            if p.startswith("genre="):
-                genre = unquote(p[6:])
-            elif p.startswith("skip="):
-                stremio_skip = int(p[5:] or 0)
-
-    page = (stremio_skip // PAGE_SIZE) + 1
-
-    # 🔧 GENRE FIX + TOP/LATEST AYRIMI
-    if "top" in id:
-        sort = [("rating", "desc")]
-    else:
-        sort = [("updated_on", "desc")]
-
-    if media_type == "movie":
-        data = await db.sort_movies(sort, page, PAGE_SIZE, genre)
-        items = data.get("movies", [])
-    else:
-        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-        items = data.get("tv_shows", [])
-
-    return {"metas": [convert_to_stremio_meta(i) for i in items]}
-
-
-# --- Meta ---
-@router.get("/meta/{media_type}/{id}.json")
-async def meta(media_type: str, id: str):
-    tmdb_id, db_index = map(int, id.split("-"))
-    media = await db.get_media_details(tmdb_id, db_index)
-
-    if not media:
-        return {"meta": {}}
-
-    meta_obj = convert_to_stremio_meta(media)
-
-    if media_type == "series":
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        videos = []
-
-        for s in media.get("seasons", []):
-            for e in s.get("episodes", []):
-                videos.append({
-                    "id": f"{id}:{s['season_number']}:{e['episode_number']}",
-                    "title": e.get("title"),
-                    "season": s["season_number"],
-                    "episode": e["episode_number"],
-                    "released": e.get("released") or yesterday,
-                    "overview": e.get("overview"),
-                })
-
-        meta_obj["videos"] = videos
-
-    return {"meta": meta_obj}
-
-
-# --- Streams ---
+# ---------------- STREAMS ----------------
 @router.get("/stream/{media_type}/{id}.json")
 async def streams(media_type: str, id: str):
     parts = id.split(":")
     tmdb_id, db_index = map(int, parts[0].split("-"))
-
     season = int(parts[1]) if len(parts) > 1 else None
     episode = int(parts[2]) if len(parts) > 2 else None
 
@@ -238,17 +130,25 @@ async def streams(media_type: str, id: str):
 
         name, title = format_stream_details(filename, quality, size, file_id)
 
-        url = (
-            file_id
-            if file_id.startswith(("http://", "https://"))
-            else f"{BASE_URL}/dl/{file_id}/video.mkv"
-        )
+        url = file_id if get_source_priority(file_id) else f"{BASE_URL}/dl/{file_id}/video.mkv"
 
         streams.append({
             "name": name,
             "title": title,
-            "url": url
+            "url": url,
+            "_source": get_source_priority(file_id),
+            "_res": get_resolution_priority(name),
+            "_size": parse_size_to_mb(size),
         })
 
-    streams.sort(key=lambda s: get_resolution_priority(s["name"]), reverse=True)
+    streams.sort(
+        key=lambda s: (s["_source"], s["_res"], s["_size"]),
+        reverse=True
+    )
+
+    for s in streams:
+        s.pop("_source", None)
+        s.pop("_res", None)
+        s.pop("_size", None)
+
     return {"streams": streams}
