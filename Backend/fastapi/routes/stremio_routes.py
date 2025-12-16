@@ -315,6 +315,7 @@ async def get_streams(media_type: str, id: str):
         base_id = parts[0]
         season_num = int(parts[1]) if len(parts) > 1 else None
         episode_num = int(parts[2]) if len(parts) > 2 else None
+
         tmdb_id_str, db_index_str = base_id.split("-")
         tmdb_id, db_index = int(tmdb_id_str), int(db_index_str)
 
@@ -332,19 +333,36 @@ async def get_streams(media_type: str, id: str):
         return {"streams": []}
 
     streams = []
+
     for quality in media_details.get("telegram", []):
-        if quality.get("id"):
-            filename = quality.get('name', '')
-            quality_str = quality.get('quality', 'HD')
-            size = quality.get('size', '')
+        file_id = quality.get("id")
+        if not file_id:
+            continue
 
-            stream_name, stream_title = format_stream_details(filename, quality_str, size)
+        filename = quality.get("name", "")
+        quality_str = quality.get("quality", "HD")
+        size = quality.get("size", "")
 
-            streams.append({
-                "name": stream_name,
-                "title": stream_title,
-                "url": quality.get("id")
-            })
+        stream_name, stream_title = format_stream_details(
+            filename, quality_str, size
+        )
 
-    streams.sort(key=lambda s: get_resolution_priority(s.get("name", "")), reverse=True)
+        # URL logic
+        if file_id.startswith("http://") or file_id.startswith("https://"):
+            stream_url = file_id
+        else:
+            stream_url = f"{BASE_URL}/dl/{file_id}/video.mkv"
+
+        streams.append({
+            "name": stream_name,
+            "title": stream_title,
+            "url": stream_url
+        })
+
+    streams.sort(
+        key=lambda s: get_resolution_priority(s.get("name", "")),
+        reverse=True
+    )
+
     return {"streams": streams}
+
