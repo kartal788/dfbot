@@ -4,8 +4,6 @@ from urllib.parse import unquote
 from Backend.config import Telegram
 from Backend import db, __version__
 import PTN
-from datetime import datetime, timezone, timedelta
-
 
 # --- Configuration ---
 BASE_URL = Telegram.BASE_URL
@@ -14,7 +12,6 @@ ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
-
 
 # --- Genres / Platforms ---
 GENRES = [
@@ -25,7 +22,6 @@ GENRES = [
 ]
 
 PLATFORMS = ["Netflix", "Disney", "Amazon", "Tv+", "Exxen"]
-
 
 # --- Helpers ---
 def convert_to_stremio_meta(item: dict) -> dict:
@@ -53,10 +49,9 @@ def convert_to_stremio_meta(item: dict) -> dict:
 
 
 def get_resolution_priority(name: str) -> int:
-    mapping = {"2160p": 2160, "1080p": 1080, "720p": 720, "480p": 480}
-    for k, v in mapping.items():
-        if k in name.lower():
-            return v
+    for r in [2160, 1080, 720, 480]:
+        if str(r) in name:
+            return r
     return 1
 
 
@@ -79,9 +74,9 @@ def format_stream(filename, quality, size, file_id):
     except:
         pass
 
+    resolution = parsed.get("resolution", quality)
     codec = parsed.get("codec", "")
     audio = parsed.get("audio", "")
-    resolution = parsed.get("resolution", quality)
 
     name = f"{source} {resolution}"
     title = f"📁 {filename}\n💾 {size}"
@@ -95,44 +90,40 @@ def format_stream(filename, quality, size, file_id):
 # --- Manifest ---
 @router.get("/manifest.json")
 async def manifest():
-    catalogs = []
-
-    # Normal catalogs
-    catalogs += [
+    catalogs = [
         {
             "type": "movie",
             "id": "latest_movies",
-            "name": "Latest Movies",
+            "name": "Son Eklenen Filmler",
             "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
             "extraSupported": ["genre", "skip"]
         },
         {
             "type": "series",
             "id": "latest_series",
-            "name": "Latest Series",
+            "name": "Son Eklenen Diziler",
             "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
             "extraSupported": ["genre", "skip"]
         }
     ]
 
-    # Platform catalogs
     for p in PLATFORMS:
-        catalogs.append({
-            "type": "movie",
-            "id": f"platform_{p.lower()}",
-            "name": p,
-            "extra": [{"name": "skip"}],
-            "extraSupported": ["skip"]
-        })
-
-    # Cast search
-    catalogs.append({
-        "type": "movie",
-        "id": "by_cast",
-        "name": "Oyuncuya Göre",
-        "extra": [{"name": "search"}],
-        "extraSupported": ["search"]
-    })
+        catalogs += [
+            {
+                "type": "movie",
+                "id": f"platform_movie_{p.lower()}",
+                "name": f"{p} Filmleri",
+                "extra": [{"name": "skip"}],
+                "extraSupported": ["skip"]
+            },
+            {
+                "type": "series",
+                "id": f"platform_series_{p.lower()}",
+                "name": f"{p} Dizileri",
+                "extra": [{"name": "skip"}],
+                "extraSupported": ["skip"]
+            }
+        ]
 
     return {
         "id": "telegram.media",
@@ -151,33 +142,38 @@ async def manifest():
 async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     skip = 0
     genre = None
-    cast = None
+    platform = None
 
     if extra:
         for p in extra.replace("&", "/").split("/"):
             if p.startswith("genre="):
                 genre = unquote(p[6:])
-            elif p.startswith("search="):
-                cast = unquote(p[7:])
             elif p.startswith("skip="):
                 skip = int(p[5:])
 
     page = (skip // PAGE_SIZE) + 1
 
-    # Platform catalog
     if id.startswith("platform_"):
-        genre = id.replace("platform_", "").capitalize()
-
-    # Cast catalog
-    if id == "by_cast" and cast:
-        data = await db.search_by_cast(cast, page, PAGE_SIZE)
-        return {"metas": [convert_to_stremio_meta(i) for i in data]}
+        _, kind, plat = id.split("_")
+        platform = plat.capitalize()
 
     if media_type == "movie":
-        data = await db.sort_movies([("updated_on", "desc")], page, PAGE_SIZE, genre)
+        data = await db.sort_movies(
+            sort=[("updated_on", "desc")],
+            page=page,
+            page_size=PAGE_SIZE,
+            genre=genre,
+            platform=platform
+        )
         items = data.get("movies", [])
     else:
-        data = await db.sort_tv_shows([("updated_on", "desc")], page, PAGE_SIZE, genre)
+        data = await db.sort_tv_shows(
+            sort=[("updated_on", "desc")],
+            page=page,
+            page_size=PAGE_SIZE,
+            genre=genre,
+            platform=platform
+        )
         items = data.get("tv_shows", [])
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
@@ -236,7 +232,10 @@ async def streams(media_type: str, id: str):
             "_size": parse_size(q["size"])
         })
 
-    streams.sort(key=lambda s: (get_resolution_priority(s["name"]), s["_size"]), reverse=True)
+    streams.sort(
+        key=lambda s: (get_resolution_priority(s["name"]), s["_size"]),
+        reverse=True
+    )
 
     for i, s in enumerate(streams):
         if i == 0:
