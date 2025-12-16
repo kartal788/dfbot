@@ -125,14 +125,10 @@ def build_media_record(meta, details, display_name, url, quality, media_type, se
 # ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
+
     args = message.command[1:]
     if not args:
         return await message.reply_text("Kullanım: /ekle link [Özel İsim]")
-
-    start_time = datetime.utcnow()
-
-    movie_count = tv_count = 0
-    new_count = updated_count = link_count = 0
 
     pairs, current = [], []
     for arg in args:
@@ -147,22 +143,22 @@ async def ekle(client: Client, message: Message):
 
     inputs = [(pixeldrain_to_api(p[0]), " ".join(p[1:]).strip() if len(p) > 1 else None) for p in pairs]
 
-    success = []
-    failed = []  # (name, reason)
-
+    success, failed = [], []
     msg = await message.reply_text("📥 İşlem başlatıldı...")
 
     for i, (raw, custom_name) in enumerate(inputs, start=1):
-        display_name = custom_name or raw
         try:
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
-            title = parsed.get("title")
-            if not title:
-                raise Exception("Dosya isminden başlık çözümlenemedi")
+            if custom_name:
+                clean = PTN.parse(custom_name)
+                title = clean.get("title")
+                year = clean.get("year") or parsed.get("year")
+            else:
+                title = parsed.get("title")
+                year = parsed.get("year")
 
-            year = parsed.get("year")
             season = parsed.get("season")
             episode = parsed.get("episode")
             quality = parsed.get("resolution") or "UNKNOWN"
@@ -174,62 +170,79 @@ async def ekle(client: Client, message: Message):
                     results = await tmdb.search().tv(query=title)
                     media_type = "tv"
                     col = series_col
-                    tv_count += 1
                 else:
                     results = await tmdb.search().movies(query=title, year=year)
                     media_type = "movie"
                     col = movie_col
-                    movie_count += 1
 
             if not results:
-                raise Exception("TMDB sonucu bulunamadı")
+                raise Exception("TMDB bulunamadı")
 
             meta = results[0]
             details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
+
             doc = await col.find_one({"tmdb_id": meta.id})
 
             if not doc:
-                new_count += 1
-                link_count += 1
                 doc = build_media_record(meta, details, display_name, raw, quality, media_type, season, episode)
                 if media_type == "movie":
                     doc["telegram"][0]["size"] = size
                 else:
                     doc["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
                 await col.insert_one(doc)
+
             else:
-                updated_count += 1
-                link_count += 1
+                if media_type == "movie":
+                    t = next((x for x in doc["telegram"] if x["name"] == display_name), None)
+                    if t:
+                        t["id"] = raw
+                        t["size"] = size
+                    else:
+                        doc["telegram"].append({
+                            "quality": quality,
+                            "id": raw,
+                            "name": display_name,
+                            "size": size
+                        })
+
+                else:
+                    s = next((x for x in doc["seasons"] if x["season_number"] == season), None)
+                    if not s:
+                        s = {"season_number": season, "episodes": []}
+                        doc["seasons"].append(s)
+
+                    e = next((x for x in s["episodes"] if x["episode_number"] == episode), None)
+                    if not e:
+                        e = {"episode_number": episode, "title": display_name, "telegram": []}
+                        s["episodes"].append(e)
+
+                    t = next((x for x in e["telegram"] if x["name"] == display_name), None)
+                    if t:
+                        t["id"] = raw
+                        t["size"] = size
+                    else:
+                        e["telegram"].append({
+                            "quality": quality,
+                            "id": raw,
+                            "name": display_name,
+                            "size": size
+                        })
+
+                doc["updated_on"] = str(datetime.utcnow())
+                await col.replace_one({"_id": doc["_id"]}, doc)
 
             success.append(display_name)
 
-        except Exception as e:
-            failed.append((display_name, str(e) or e.__class__.__name__))
+        except Exception:
+            failed.append(display_name)
 
         await msg.edit_text(f"🔄 {i}/{len(inputs)}\n✅ {len(success)} | ❌ {len(failed)}")
 
-    duration = datetime.utcnow() - start_time
-    minutes, seconds = divmod(int(duration.total_seconds()), 60)
-
-    success_list = "\n".join(f"• {x}" for x in success[:5]) or "• Yok"
-    failed_list = "\n".join(
-        f"• {name}\n   ↳ ❗ {reason}"
-        for name, reason in failed[:5]
-    ) or "• Yok"
-
     await msg.edit_text(
-        f"📊 **İşlem Tamamlandı**\n\n"
-        f"🔢 Toplam İşlem: {len(inputs)}\n"
+        f"📊 **Tamamlandı**\n\n"
+        f"🔢 Toplam: {len(inputs)}\n"
         f"✅ Başarılı: {len(success)}\n"
-        f"❌ Başarısız: {len(failed)}\n\n"
-        f"🎬 Filmler: {movie_count}\n"
-        f"📺 Dizi Bölümleri: {tv_count}\n\n"
-        f"🆕 Yeni Kayıt: {new_count}\n"
-        f"🔁 Güncellenen: {updated_count}\n"
-        f"🔗 Eklenen Link: {link_count}\n\n"
-        f"⏱️ Süre: {minutes:02d}:{seconds:02d}\n\n"
-        f"🟢 **Eklenenler:**\n{success_list}\n\n"
-        f"🔴 **Başarısız (Nedenleriyle):**\n{failed_list}"
+        f"❌ Başarısız: {len(failed)}"
     )
 
 # ----------------- /SİL -----------------
