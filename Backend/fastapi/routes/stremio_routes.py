@@ -3,13 +3,11 @@ from typing import Optional
 from urllib.parse import unquote
 from datetime import datetime, timezone, timedelta
 
-import PTN
-
 from Backend.config import Telegram
 from Backend import db, __version__
 
 
-# ─── CONFIG ────────────────────────────────────────────────────────────────────
+# ─── CONFIG ─────────────────────────────────────────────────────────────────────
 BASE_URL = Telegram.BASE_URL
 ADDON_NAME = "Arşivim"
 ADDON_VERSION = __version__
@@ -26,35 +24,25 @@ GENRES = [
 ]
 
 
-# ─── PLATFORMS ──────────────────────────────────────────────────────────────────
-PLATFORMS = {
-    "netflix": ["nf"],
-    "amazon": ["amzn"],
-    "disney": ["dsnp"],
-    "hbo": ["hbo", "hbomax", "blutv"],
+# ─── PLATFORM GENRE MAP ─────────────────────────────────────────────────────────
+PLATFORM_GENRES = {
+    "netflix": ["Netflix"],
+    "amazon": ["Amazon"],
+    "disney": ["Disney"],
+    "hbo": ["HBO", "Hbomax", "BluTV"],
+    "tvplus": ["Tv+"]
 }
 
 
 # ─── HELPERS ────────────────────────────────────────────────────────────────────
-def detect_platform_from_name(name: str) -> Optional[str]:
-    if not name:
+def detect_platform_from_genres(genres: list[str]) -> Optional[str]:
+    if not genres:
         return None
 
-    search_space = name.lower()
-
-    try:
-        parsed = PTN.parse(name)
-        for v in parsed.values():
-            if isinstance(v, str):
-                search_space += " " + v.lower()
-    except Exception:
-        pass
-
-    for platform, keys in PLATFORMS.items():
-        for k in keys:
-            if k in search_space:
+    for platform, names in PLATFORM_GENRES.items():
+        for g in genres:
+            if g in names:
                 return platform
-
     return None
 
 
@@ -78,7 +66,7 @@ def convert_to_stremio_meta(item: dict) -> dict:
 def build_platform_catalogs():
     catalogs = []
 
-    for platform in PLATFORMS.keys():
+    for platform in PLATFORM_GENRES.keys():
         catalogs.append({
             "type": "movie",
             "id": f"{platform}_movies",
@@ -105,14 +93,14 @@ async def manifest():
         {
             "type": "movie",
             "id": "latest_movies",
-            "name": "Latest Filmler",
+            "name": "Son Eklenen Filmler",
             "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
             "extraSupported": ["genre", "skip"]
         },
         {
             "type": "series",
             "id": "latest_series",
-            "name": "Latest Diziler",
+            "name": "Son Eklenen Diziler",
             "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
             "extraSupported": ["genre", "skip"]
         },
@@ -146,7 +134,7 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
 
     page = (skip // PAGE_SIZE) + 1
 
-    for p in PLATFORMS.keys():
+    for p in PLATFORM_GENRES.keys():
         if id.startswith(p):
             platform = p
             break
@@ -156,8 +144,7 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             sort=[("updated_on", "desc")],
             page=page,
             page_size=PAGE_SIZE,
-            genre=genre,
-            platform=platform
+            genre=genre
         )
         items = data.get("movies", [])
     else:
@@ -165,16 +152,15 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             sort=[("updated_on", "desc")],
             page=page,
             page_size=PAGE_SIZE,
-            genre=genre,
-            platform=platform
+            genre=genre
         )
         items = data.get("tv_shows", [])
 
-    # fallback: platform db’de yoksa name ile ayıkla
+    # 🔥 PLATFORM FİLTRESİ (GENRES ÜZERİNDEN)
     if platform:
         items = [
             i for i in items
-            if detect_platform_from_name(i.get("name", "")) == platform
+            if detect_platform_from_genres(i.get("genres", [])) == platform
         ]
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
@@ -235,7 +221,7 @@ async def streams(media_type: str, id: str):
         )
 
         streams.append({
-            "name": name,
+            "name": q.get("quality", "HD"),
             "title": name,
             "url": url
         })
