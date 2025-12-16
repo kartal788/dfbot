@@ -23,6 +23,12 @@ client_db = MongoClient(MONGO_URL)
 db_name = client_db.list_database_names()[0]
 db = client_db[db_name]
 
+# ------------ URL OLUŞTURMA HELPER ------------
+def build_url(file_id: str) -> str:
+    if file_id.startswith("http://") or file_id.startswith("https://"):
+        return file_id
+    return f"{BASE_URL}/dl/{file_id}/video.mkv"
+
 # ------------ /m3uindir KOMUTU ------------
 @Client.on_message(filters.command("m3uindir") & filters.private & CustomFilters.owner)
 async def send_m3u_file(client, message: Message):
@@ -48,7 +54,7 @@ async def send_m3u_file(client, message: Message):
                     if not file_id or not name:
                         continue
 
-                    url = f"{BASE_URL}/dl/{file_id}/video.mkv"
+                    url = build_url(file_id)
 
                     # --- Yıl kategorisi ---
                     year_match = re.search(r"\b(19\d{2}|20\d{2})\b", name)
@@ -78,7 +84,7 @@ async def send_m3u_file(client, message: Message):
                         year_group = "Filmler"
 
                     m3u.write(
-                        f'#EXTINF:-1 tvg-id="" tvg-name="{name}" tvg-logo="{logo}" group-title="{year_group}",{name}\n'
+                        f'#EXTINF:-1 tvg-name="{name}" tvg-logo="{logo}" group-title="{year_group}",{name}\n'
                     )
                     m3u.write(f"{url}\n")
 
@@ -86,7 +92,7 @@ async def send_m3u_file(client, message: Message):
                     for genre in genres:
                         genre_group = f"{genre} Filmleri"
                         m3u.write(
-                            f'#EXTINF:-1 tvg-id="" tvg-name="{name}" tvg-logo="{logo}" group-title="{genre_group}",{name}\n'
+                            f'#EXTINF:-1 tvg-name="{name}" tvg-logo="{logo}" group-title="{genre_group}",{name}\n'
                         )
                         m3u.write(f"{url}\n")
 
@@ -110,7 +116,7 @@ async def send_m3u_file(client, message: Message):
                             if not file_id or not name:
                                 continue
 
-                            url = f"{BASE_URL}/dl/{file_id}/video.mkv"
+                            url = build_url(file_id)
                             name_low = name.lower()
 
                             # --- Platform kategorileri ---
@@ -134,7 +140,7 @@ async def send_m3u_file(client, message: Message):
                                 group = "Diziler"
 
                             m3u.write(
-                                f'#EXTINF:-1 tvg-id="" tvg-name="{name}" tvg-logo="{logo}" group-title="{group}",{name}\n'
+                                f'#EXTINF:-1 tvg-name="{name}" tvg-logo="{logo}" group-title="{group}",{name}\n'
                             )
                             m3u.write(f"{url}\n")
 
