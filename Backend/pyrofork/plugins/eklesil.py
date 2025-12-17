@@ -71,24 +71,28 @@ async def ekle(client: Client, message: Message):
     reply_message = []  # Çıktı mesajlarını depolayacağımız liste
     added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
 
-    # ----------------- Update mesajı 15 saniyede bir -----------------
-    async def update_status(status, current_status):
+    # ----------------- Update mesajı 1 saniyede bir -----------------
+    async def update_status(status, current_status, total_files, processed_files):
         last_status = current_status  # Track the last status
 
-        while True:
-            await asyncio.sleep(15)  # 15 saniye bekle
-            new_status = f"📥 Metadata alınıyor... {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+        while processed_files < total_files:
+            await asyncio.sleep(20)  # Her 1 saniyede bir
+            progress = processed_files / total_files
+            progress_bar = create_progress_bar(progress)
+            percentage = round(progress * 100, 2)  # Yüzdeyi hesaplıyoruz
+
+            new_status = f"📥 Metadata alınıyor... {progress_bar} {percentage}%"
 
             if new_status != last_status:  # Only update if content has changed
                 current_status = new_status
                 await status.edit_text(current_status)
                 last_status = new_status  # Update last_status to the new one
 
-    # Mesajı güncelleyen asenkron fonksiyonu başlat
-    asyncio.create_task(update_status(status, current_status))
+    # Fonksiyonu başlatıyoruz
+    asyncio.create_task(update_status(status, current_status, len(args), 0))
 
     # Linkleri işleme kısmı
-    for raw_link in args:
+    for i, raw_link in enumerate(args):
         try:
             api_link = pixeldrain_to_api(raw_link)
             filename = await filename_from_url(api_link)
@@ -201,22 +205,8 @@ async def ekle(client: Client, message: Message):
                     doc["updated_on"] = str(datetime.utcnow())
                     await col.replace_one({"_id": doc["_id"]}, doc)
 
-            # Yeni talep: "title", "name", "size", "quality" bilgilerini dökme
-            titles = meta.get("title", [])
-            if isinstance(titles, list):
-                titles = "\n".join(titles)  # Eğer title bir listeyse, her birini alt alta ekleriz
-            else:
-                titles = meta.get("title", "")
-
-            reply_message.append(
-                f"🎬 **Başlıklar**:\n{titles}\n"
-                f"📄 **Ad**: {filename}\n"
-                f"📊 **Boyut**: {size}\n"
-                f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
-            )
-
-            # Eklenen dosyaları tutuyoruz
-            added_files.append(f"Ad: {filename}, Boyut: {size}, Kalite: {meta.get('quality', 'Bilgi Yok')}")
+            # İşlem bitince ilerlemeyi güncelliyoruz
+            processed_files += 1
 
         except Exception as e:
             LOGGER.exception(e)
@@ -231,6 +221,20 @@ async def ekle(client: Client, message: Message):
                 "- Pixeldrain erişim sorunu"
             )
 
+    # İşlem tamamlandıktan sonra, bir bilgilendirme mesajı göndereceğiz
+    await status.edit_text("✅ Ekleme işlemi başarıyla tamamlandı!")
+
+# ----------------- İlerleme Çubuğu -----------------
+def create_progress_bar(progress):
+    total_blocks = 12  # İlerleme çubuğunda kaç blok olacak (⬢⬡ toplam 12 blok)
+    filled_blocks = int(progress * total_blocks)  # Dolu blok sayısı
+    empty_blocks = total_blocks - filled_blocks  # Boş blok sayısı
+
+    # Dolu ve boş blokları oluşturuyoruz
+    progress_bar = "⬢" * filled_blocks + "⬡" * empty_blocks
+    return progress_bar
+
+
     # Eğer 2 veya daha az link eklenmişse, dosya bilgilerini Telegram'a gönderiyoruz
     if len(args) <= 2:
         # Status mesajı düzenleniyor
@@ -240,7 +244,7 @@ async def ekle(client: Client, message: Message):
         for index, message_info in enumerate(reply_message):
             # 15 saniye arayla gönderim yapıyoruz
             if index > 0:  # İlk gönderim dışında bekleme yapıyoruz
-                await asyncio.sleep(15)  # 15 saniye bekleme
+                await asyncio.sleep(30)  # 15 saniye bekleme
 
             # Mesajı düzenliyoruz
             await status.edit_text(
