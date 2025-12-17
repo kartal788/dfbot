@@ -21,7 +21,7 @@ class Episode(BaseModel):
     episode_backdrop: Optional[str] = None
     overview: Optional[str] = None
     released: Optional[str] = None
-    telegram: Optional[List[QualityDetail]]
+    telegram: Optional[List[QualityDetail]] = None
 
 
 # ---------------------------
@@ -51,8 +51,7 @@ class TVShowSchema(BaseModel):
     runtime: Optional[str] = None
     media_type: str
 
-    # ✅ YENİ EKLENEN (filename'den gelen platform)
-    platform: Optional[str] = None
+    platform: Optional[List[str]] = None  # ✅ LİSTE
 
     updated_on: datetime = Field(default_factory=datetime.utcnow)
     seasons: List[Season] = Field(default_factory=list)
@@ -77,8 +76,7 @@ class MovieSchema(BaseModel):
     runtime: Optional[str] = None
     media_type: str
 
-    # ✅ YENİ EKLENEN (filename'den gelen platform)
-    platform: Optional[str] = None
+    platform: Optional[List[str]] = None  # ✅ LİSTE
 
     updated_on: datetime = Field(default_factory=datetime.utcnow)
-    telegram: Optional[List[QualityDetail]]
+    telegram: Optional[List[QualityDetail]] = None
