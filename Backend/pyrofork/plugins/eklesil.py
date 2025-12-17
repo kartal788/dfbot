@@ -68,7 +68,6 @@ async def filesize(url):
 async def ekle(client: Client, message: Message):
     text = message.text.strip()
 
-    # Tek satır + çok satır desteği
     if "\n" in text:
         lines = text.split("\n")[1:]
     else:
@@ -81,9 +80,12 @@ async def ekle(client: Client, message: Message):
         )
 
     status = await message.reply_text("📥 Metadata alınıyor...")
+
     movie_count = 0
     series_count = 0
     failed = []
+    added_movies = []
+    added_series = []
 
     for line in lines:
         line = line.strip()
@@ -95,31 +97,22 @@ async def ekle(client: Client, message: Message):
         extra_info = parts[1] if len(parts) > 1 else None
 
         try:
-            # Pixeldrain linki varsa API linkine çevir
             api_link = pixeldrain_to_api(link) if "pixeldrain.com" in link else link
 
-            # Dosya boyutu ve filename al
             try:
                 size = await filesize(api_link)
                 cd_filename = await filename_from_url(api_link)
-                if extra_info:
-                    meta_filename = extra_info
-                elif cd_filename:
-                    meta_filename = cd_filename
-                else:
-                    meta_filename = link.split("/")[-1]
+                meta_filename = extra_info or cd_filename or link.split("/")[-1]
             except:
                 size = "YOK"
-                meta_filename = extra_info if extra_info else link.split("/")[-1]
+                meta_filename = extra_info or link.split("/")[-1]
 
-            # Metadata al
             meta = await metadata(
                 filename=meta_filename,
                 channel=message.chat.id,
                 msg_id=message.id
             )
 
-            # Metadata yoksa bile dosya adını kullan
             if not meta:
                 meta = {
                     "media_type": "movie",
@@ -179,6 +172,7 @@ async def ekle(client: Client, message: Message):
                     doc["updated_on"] = str(datetime.utcnow())
                     await movie_col.replace_one({"_id": doc["_id"]}, doc)
                 movie_count += 1
+                added_movies.append(meta["title"])
 
             # ----------------- TV -----------------
             else:
@@ -223,15 +217,23 @@ async def ekle(client: Client, message: Message):
                     doc["updated_on"] = str(datetime.utcnow())
                     await series_col.replace_one({"_id": doc["_id"]}, doc)
                 series_count += 1
+                added_series.append(meta["title"])
 
         except Exception as e:
             LOGGER.exception(e)
             failed.append(line)
 
-    await status.edit_text(
-        f"✅ İşlem tamamlandı\n\n🎬 Film: {movie_count}\n📺 Dizi: {series_count}\n❌ Hatalı: {len(failed)}"
-    )
+    # ----------------- Mesaj formatı -----------------
+    if len(added_movies) + len(added_series) > 15:
+        # Eski tasarım: sadece sayı göster
+        result_text = f"✅ İşlem tamamlandı\n\n🎬 Film: {movie_count}\n📺 Dizi: {series_count}\n❌ Hatalı: {len(failed)}"
+    else:
+        # Yeni tasarım: isimleri de listele
+        movies_text = "\n".join(f"🎬 {name}" for name in added_movies)
+        series_text = "\n".join(f"📺 {name}" for name in added_series)
+        result_text = f"✅ İşlem tamamlandı\n\n{movies_text}\n{series_text}\n❌ Hatalı: {len(failed)}"
 
+    await status.edit_text(result_text)
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
