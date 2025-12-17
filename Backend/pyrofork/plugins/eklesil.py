@@ -215,37 +215,49 @@ async def ekle(client: Client, message: Message):
                 "- Pixeldrain erişim sorunu"
             )
 
-    # Eğer 2 veya daha az link eklenmişse, dosya bilgilerini Telegram'a gönderiyoruz
-    if len(args) <= 2:
-        # Status mesajı siliniyor
-        await status.delete()
+# Eğer 2 veya daha az link eklenmişse, dosya bilgilerini Telegram'a gönderiyoruz
+if len(args) <= 2:
+    # Status mesajı düzenleniyor
+    await status.edit_text("📥 Metadata alınıyor...")
 
-        # Her dosya bilgisi Telegram mesajı olarak gönderiliyor
-        for message_info in reply_message:
-            await message.reply_text(message_info)
-
-    # Eğer 3'ten fazla link eklenmişse, bilgileri dosyaya yazıyoruz
-    else:
-        file_path = "eklenenler.txt"
-        with open(file_path, "w") as f:
-            for file_info in added_files:
-                f.write(file_info + "\n")
-
-        # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
+    # Her dosya bilgisi Telegram mesajı olarak gönderiliyor
+    for index, message_info in enumerate(reply_message):
+        # 15 saniye arayla gönderim yapıyoruz
+        if index > 0:  # İlk gönderim dışında bekleme yapıyoruz
+            await asyncio.sleep(15)  # 15 saniye bekleme
+        
+        # Mesajı düzenliyoruz
         await status.edit_text(
-            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
+            f"{message_info}\n\n"
+            f"{titles}\n"
+            f"📄 **Ad**: {filename}\n"
+            f"📊 **Boyut**: {size}\n"
+            f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
+        )
+    
+# Eğer 3'ten fazla link eklenmişse, bilgileri dosyaya yazıyoruz
+else:
+    file_path = "eklenenler.txt"
+    with open(file_path, "w") as f:
+        for file_info in added_files:
+            f.write(file_info + "\n")
+
+    # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
+    await status.edit_text(
+        f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
+    )
+
+    # Dosyayı Telegram'a gönderiyoruz
+    with open(file_path, "rb") as file:
+        await client.send_document(
+            message.chat.id, 
+            file, 
+            caption=f"{len(args)} dosya eklendi."
         )
 
-        # Dosyayı Telegram'a gönderiyoruz
-        with open(file_path, "rb") as file:
-            await client.send_document(
-                message.chat.id, 
-                file, 
-                caption=f"{len(args)} dosya eklendi."
-            )
-        
-        # Dosyayı gönderimden sonra siliyoruz
-        os.remove(file_path)
+    # Dosyayı gönderimden sonra siliyoruz
+    os.remove(file_path)
+
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
