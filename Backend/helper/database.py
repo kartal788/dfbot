@@ -428,122 +428,73 @@ class Database:
             if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
                 return await self._handle_storage_error(self.update_movie, movie_data, total_storage_dbs=total_storage_dbs)
 
-    async def update_tv_show(self, tv_show_data: TVShowSchema) -> Optional[ObjectId]:
-        try:
-            tv_show_dict = tv_show_data.dict()
-        except ValidationError as e:
-            LOGGER.error(f"Validation error: {e}")
-            return None
+async def update_tv_show(self, tv_show_data: TVShowSchema):
+    tv_show_dict = tv_show_data.dict(exclude_unset=True)
 
-        imdb_id = tv_show_dict.get("imdb_id")
-        tmdb_id = tv_show_dict.get("tmdb_id")
-        title = tv_show_dict["title"]
-        release_year = tv_show_dict["release_year"]
+    existing_tv = await self.tv_collection.find_one(
+        {
+            "$or": [
+                {"tmdb_id": tv_show_dict.get("tmdb_id")},
+                {"imdb_id": tv_show_dict.get("imdb_id")},
+            ]
+        }
+    )
 
-        current_db_key = f"storage_{self.current_db_index}"
-        total_storage_dbs = len(self.dbs) - 1
+    if not existing_tv:
+        return None
 
-        existing_tv = None
-        existing_db_key = None
-        existing_db_index = None
+    # ---------------- SEASON / EPISODE MERGE ----------------
+    for season in tv_show_dict.get("seasons", []):
+        season_number = season["season_number"]
 
-        for db_index in range(1, total_storage_dbs + 1):
-            db_key = f"storage_{db_index}"
-            tv = None
+        existing_season = next(
+            (s for s in existing_tv.get("seasons", []) if s["season_number"] == season_number),
+            None
+        )
 
-            if imdb_id:
-                tv = await self.dbs[db_key]["tv"].find_one({"imdb_id": imdb_id})
-            if not tv and tmdb_id:
-                tv = await self.dbs[db_key]["tv"].find_one({"tmdb_id": tmdb_id})
-            if not tv and title and release_year:
-                tv = await self.dbs[db_key]["tv"].find_one({
-                    "title": title,
-                    "release_year": release_year
-                })
+        if not existing_season:
+            existing_tv.setdefault("seasons", []).append(season)
+            continue
 
-            if tv:
-                existing_tv = tv
-                existing_db_key = db_key
-                existing_db_index = db_index
-                break
+        for episode in season.get("episodes", []):
+            episode_number = episode["episode_number"]
 
-        # ---------------- INSERT NEW TV ----------------
-        if not existing_tv:
-            try:
-                tv_show_dict["db_index"] = self.current_db_index
-                result = await self.dbs[current_db_key]["tv"].insert_one(tv_show_dict)
-                return result.inserted_id
-            except Exception as e:
-                LOGGER.error(f"Insertion failed in {current_db_key}: {e}")
-                if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
-                    return await self._handle_storage_error(self.update_tv_show, tv_show_data, total_storage_dbs=total_storage_dbs)
-                return None
-
-        # ---------------- UPDATE TV ----------------
-        tv_id = existing_tv["_id"]
-
-        for season in tv_show_dict["seasons"]:
-            existing_season = next(
-                (s for s in existing_tv["seasons"]
-                if s["season_number"] == season["season_number"]),
+            existing_episode = next(
+                (e for e in existing_season.get("episodes", []) if e["episode_number"] == episode_number),
                 None
             )
 
-            if not existing_season:
-                existing_tv["seasons"].append(season)
+            if not existing_episode:
+                existing_season.setdefault("episodes", []).append(episode)
                 continue
 
-            for episode in season["episodes"]:
-                existing_episode = next(
-                    (e for e in existing_season["episodes"]
-                    if e["episode_number"] == episode["episode_number"]),
-                    None
-                )
-
-                if not existing_episode:
-                    existing_season["episodes"].append(episode)
-                    continue
-
-                existing_episode.setdefault("telegram", [])
-
-                for quality in episode["telegram"]:
-                    target_quality = quality.get("quality")
-
-                    if Telegram.REPLACE_MODE:
-                        to_delete = [
-                            q for q in existing_episode["telegram"]
-                            if q.get("quality") == target_quality
-                        ]
-
-                        for q in to_delete:
-                            try:
-                                old_id = q.get("id")
-                                if old_id:
-                                    decoded = await decode_string(old_id)
-                                    chat_id = int(f"-100{decoded['chat_id']}")
-                                    msg_id = int(decoded['msg_id'])
-                                    create_task(delete_message(chat_id, msg_id))
-                            except Exception as e:
-                                LOGGER.error(f"Failed to delete old quality: {e}")
-
-                        existing_episode["telegram"] = [
-                            q for q in existing_episode["telegram"]
-                            if q.get("quality") != target_quality
-                        ]
+            for quality in episode.get("telegram", []):
+                if "telegram" not in existing_episode:
+                    existing_episode["telegram"] = [quality]
+                else:
+                    if quality not in existing_episode["telegram"]:
                         existing_episode["telegram"].append(quality)
 
-                    else:
-                        existing_episode["telegram"].append(quality)
-# ---------------- PLATFORM MERGE ----------------
-incoming_platforms = tv_show_dict.get("platform", [])
-existing_platforms = existing_tv.get("platform", [])
+    # ---------------- PLATFORM MERGE ----------------
+    incoming_platforms = tv_show_dict.get("platform", [])
+    existing_platforms = existing_tv.get("platform", [])
 
-merged_platforms = set(existing_platforms or [])
-merged_platforms.update(incoming_platforms or [])
+    merged_platforms = set(existing_platforms or [])
+    merged_platforms.update(incoming_platforms or [])
 
-existing_tv["platform"] = list(merged_platforms) if merged_platforms else None
+    existing_tv["platform"] = list(merged_platforms) if merged_platforms else None
 
-        existing_tv["updated_on"] = datetime.utcnow()
+    # ---------------- UPDATED TIME ----------------
+    existing_tv["updated_on"] = datetime.utcnow()
+
+    # ---------------- DB UPDATE ----------------
+    await self.tv_collection.replace_one(
+        {"_id": existing_tv["_id"]},
+        existing_tv
+    )
+
+    return existing_tv
+
 
         # ---------------- MOVE DB IF NEEDED ----------------
         if existing_db_index != self.current_db_index:
