@@ -1,31 +1,28 @@
 import asyncio
 import re
-from cachetools import TTLCache
-from PTN import parse as ptn_parse
-from imdb import Cinemagoer
-from tmdbv3api import TMDb, Movie, TV, Search
+import traceback
+import PTN
+from Backend.helper.imdb import get_detail, get_season, search_title
+from themoviedb import aioTMDb
+from Backend.config import Telegram
+import Backend
+from Backend.logger import LOGGER
+from Backend.helper.encrypt import encode_string
 
-# ================= TMDB CONFIG =================
-tmdb = TMDb()
-tmdb.api_key = "TMDB_API_KEYIN"
-tmdb.language = "en"
+# ----------------- Configuration -----------------
+DELAY = 0
+tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
 
-tmdb_movie = Movie()
-tmdb_tv = TV()
-tmdb_search = Search()
-
-imdb = Cinemagoer()
+# ----------------- SIMPLE CACHES (NO DEPENDENCY) -----------------
+IMDB_CACHE = {}
+TMDB_SEARCH_CACHE = {}
+TMDB_DETAILS_CACHE = {}
+EPISODE_CACHE = {}
 
 API_SEMAPHORE = asyncio.Semaphore(12)
 
-# ================= CACHE =================
-IMDB_CACHE = TTLCache(maxsize=3000, ttl=3600)
-TMDB_DETAILS_CACHE = TTLCache(maxsize=3000, ttl=3600)
-TMDB_SEARCH_CACHE = TTLCache(maxsize=3000, ttl=3600)
-EPISODE_CACHE = TTLCache(maxsize=5000, ttl=3600)
-
-# ================= GENRE MAP =================
-TMDB_GENRE_MAP = {
+# ----------------- GENRE MAP (TMDB → TR) -----------------
+GENRE_MAP = {
     "Action": "Aksiyon",
     "Adventure": "Macera",
     "Animation": "Animasyon",
@@ -45,7 +42,6 @@ TMDB_GENRE_MAP = {
     "Thriller": "Gerilim",
     "War": "Savaş",
     "Western": "Vahşi Batı",
-
     "Action & Adventure": "Aksiyon ve Macera",
     "Kids": "Çocuklar",
     "Reality": "Gerçeklik",
@@ -55,7 +51,6 @@ TMDB_GENRE_MAP = {
     "War & Politics": "Savaş ve Politika",
 }
 
-# ================= PLATFORM MAP =================
 PLATFORM_MAP = {
     "nf": "Netflix",
     "netflix": "Netflix",
@@ -72,146 +67,114 @@ PLATFORM_MAP = {
     "tod": "Tod",
 }
 
-# ================= HELPERS =================
-def normalize_tmdb_genres(tmdb_genres):
+# ----------------- HELPERS -----------------
+def normalize_genres(tmdb_genres, telegram_names):
     genres = []
     for g in tmdb_genres or []:
-        name = g["name"] if isinstance(g, dict) else str(g)
-        tr = TMDB_GENRE_MAP.get(name, name)
+        name = g.name if hasattr(g, "name") else str(g)
+        tr = GENRE_MAP.get(name, name)
         if tr not in genres:
             genres.append(tr)
+
+    for t in telegram_names or []:
+        low = t.lower()
+        for key, val in PLATFORM_MAP.items():
+            if key in low and val not in genres:
+                genres.append(val)
+
     return genres
 
 
-def inject_platforms(genres, telegram_names):
-    for name in telegram_names or []:
-        low = name.lower()
-        for key, platform in PLATFORM_MAP.items():
-            if key in low and platform not in genres:
-                genres.append(platform)
-    return genres
+def format_tmdb_image(path: str, size="w500"):
+    return f"https://image.tmdb.org/t/p/{size}{path}" if path else ""
 
 
-def build_final_genres(tmdb_genres, telegram_files):
-    genres = normalize_tmdb_genres(tmdb_genres)
-    return inject_platforms(genres, telegram_files)
-
-
-def clean_filename(name: str):
-    return re.sub(r"[._]+", " ", name).strip()
-
-
-# ================= TMDB FETCH =================
-async def tmdb_movie_details(movie_id):
-    if movie_id in TMDB_DETAILS_CACHE:
-        return TMDB_DETAILS_CACHE[movie_id]
-
-    async with API_SEMAPHORE:
-        details = await asyncio.to_thread(
-            tmdb_movie.details,
-            movie_id,
-            append_to_response="external_ids,credits,images"
-        )
-        TMDB_DETAILS_CACHE[movie_id] = details
-        return details
-
-
-async def tmdb_tv_details(tv_id):
-    if tv_id in TMDB_DETAILS_CACHE:
-        return TMDB_DETAILS_CACHE[tv_id]
-
-    async with API_SEMAPHORE:
-        details = await asyncio.to_thread(
-            tmdb_tv.details,
-            tv_id,
-            append_to_response="external_ids,credits,images"
-        )
-        TMDB_DETAILS_CACHE[tv_id] = details
-        return details
-
-
-# ================= MAIN METADATA =================
-async def extract_metadata(filename, telegram_files):
-    parsed = ptn_parse(filename)
-    title = parsed.get("title")
-    year = parsed.get("year")
-    is_tv = bool(parsed.get("season"))
-
-    telegram_names = [f["name"] for f in telegram_files]
-
-    if is_tv:
-        return await build_tv_metadata(title, year, telegram_names)
-    else:
-        return await build_movie_metadata(title, year, telegram_names)
-
-
-# ================= MOVIE =================
-async def build_movie_metadata(title, year, telegram_names):
-    query_key = f"{title}_{year}"
-    if query_key in TMDB_SEARCH_CACHE:
-        result = TMDB_SEARCH_CACHE[query_key]
-    else:
-        async with API_SEMAPHORE:
-            res = await asyncio.to_thread(
-                tmdb_search.movies,
-                {"query": title, "year": year}
-            )
-            result = res[0] if res else None
-            TMDB_SEARCH_CACHE[query_key] = result
-
-    if not result:
+# ----------------- MAIN METADATA -----------------
+async def metadata(filename: str, channel: int, msg_id):
+    try:
+        parsed = PTN.parse(filename)
+    except Exception:
         return None
 
-    movie = await tmdb_movie_details(result.id)
+    title = parsed.get("title")
+    season = parsed.get("season")
+    episode = parsed.get("episode")
+    year = parsed.get("year")
+    quality = parsed.get("resolution")
 
-    genres = build_final_genres(movie.genres, telegram_names)
+    if not title or not quality:
+        return None
+
+    data = {"chat_id": channel, "msg_id": msg_id}
+    try:
+        encoded_string = await encode_string(data)
+    except:
+        encoded_string = None
+
+    if season and episode:
+        return await fetch_tv_metadata(title, season, episode, encoded_string, year, quality)
+    else:
+        return await fetch_movie_metadata(title, encoded_string, year, quality)
+
+
+# ----------------- MOVIE -----------------
+async def fetch_movie_metadata(title, encoded_string, year, quality):
+    imdb_id = await search_title(title, "movie")
+    movie = None
+
+    if imdb_id:
+        movie = await get_detail(imdb_id, "movie")
+
+    if not movie:
+        res = await tmdb.search().movies(query=title, year=year)
+        if not res:
+            return None
+        movie = await tmdb.movie(res[0].id).details(append_to_response="credits,images")
+
+    genres = normalize_genres(movie.genres, [])
 
     return {
-        "type": "movie",
         "title": movie.title,
-        "original_title": movie.original_title,
-        "year": int(movie.release_date[:4]) if movie.release_date else None,
-        "tmdb_id": int(movie.id),
-        "imdb_id": movie.external_ids.get("imdb_id"),
-        "rating": movie.vote_average,
-        "overview": movie.overview,
-        "runtime": movie.runtime,
+        "year": year,
+        "imdb_id": getattr(movie.external_ids, "imdb_id", None),
+        "tmdb_id": movie.id,
+        "rate": movie.vote_average,
+        "description": movie.overview,
+        "poster": format_tmdb_image(movie.poster_path),
+        "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
         "genres": genres,
-        "cast": [c.name for c in movie.credits.get("cast", [])[:10]],
+        "media_type": "movie",
+        "quality": quality,
+        "encoded_string": encoded_string,
     }
 
 
-# ================= TV =================
-async def build_tv_metadata(title, year, telegram_names):
-    query_key = f"{title}_{year}"
-    if query_key in TMDB_SEARCH_CACHE:
-        result = TMDB_SEARCH_CACHE[query_key]
-    else:
-        async with API_SEMAPHORE:
-            res = await asyncio.to_thread(
-                tmdb_search.tv,
-                {"query": title, "first_air_date_year": year}
-            )
-            result = res[0] if res else None
-            TMDB_SEARCH_CACHE[query_key] = result
-
-    if not result:
+# ----------------- TV -----------------
+async def fetch_tv_metadata(title, season, episode, encoded_string, year, quality):
+    res = await tmdb.search().tv(query=title)
+    if not res:
         return None
 
-    tv = await tmdb_tv_details(result.id)
+    tv = await tmdb.tv(res[0].id).details(append_to_response="credits,images")
+    ep = await tmdb.episode(tv.id, season, episode).details()
 
-    genres = build_final_genres(tv.genres, telegram_names)
+    genres = normalize_genres(tv.genres, [])
 
     return {
-        "type": "tv",
-        "name": tv.name,
-        "original_name": tv.original_name,
-        "year": int(tv.first_air_date[:4]) if tv.first_air_date else None,
-        "tmdb_id": int(tv.id),
-        "imdb_id": tv.external_ids.get("imdb_id"),
-        "rating": tv.vote_average,
-        "overview": tv.overview,
+        "title": tv.name,
+        "year": year,
+        "imdb_id": getattr(tv.external_ids, "imdb_id", None),
+        "tmdb_id": tv.id,
+        "rate": tv.vote_average,
+        "description": tv.overview,
+        "poster": format_tmdb_image(tv.poster_path),
+        "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
         "genres": genres,
-        "cast": [c.name for c in tv.credits.get("cast", [])[:10]],
-        "seasons": [],
+        "media_type": "tv",
+        "season_number": season,
+        "episode_number": episode,
+        "episode_title": ep.name if ep else "",
+        "episode_overview": ep.overview if ep else "",
+        "quality": quality,
+        "encoded_string": encoded_string,
     }
