@@ -1,8 +1,6 @@
 import asyncio
-import traceback
 import PTN
 import re
-from re import compile, IGNORECASE
 
 from Backend.helper.imdb import get_detail, get_season, search_title
 from themoviedb import aioTMDb
@@ -137,7 +135,9 @@ async def _tmdb_tv_details(tid):
     if tid in TMDB_DETAILS_CACHE:
         return TMDB_DETAILS_CACHE[tid]
     async with API_SEMAPHORE:
-        d = await tmdb.tv(tid).details(append_to_response="external_ids,credits")
+        d = await tmdb.tv(tid).details(
+            append_to_response="external_ids,credits"
+        )
         d.images = await tmdb.tv(tid).images()
     TMDB_DETAILS_CACHE[tid] = d
     return d
@@ -153,8 +153,19 @@ async def _tmdb_episode_details(tid, s, e):
     EPISODE_CACHE[key] = d
     return d
 
+async def _tmdb_movie_details(mid):
+    if mid in TMDB_DETAILS_CACHE:
+        return TMDB_DETAILS_CACHE[mid]
+    async with API_SEMAPHORE:
+        d = await tmdb.movie(mid).details(
+            append_to_response="external_ids,credits"
+        )
+        d.images = await tmdb.movie(mid).images()
+    TMDB_DETAILS_CACHE[mid] = d
+    return d
+
 # -------------------------------------------------
-# MAIN
+# MAIN ENTRY
 # -------------------------------------------------
 async def metadata(filename, channel, msg_id):
     try:
@@ -175,16 +186,24 @@ async def metadata(filename, channel, msg_id):
 
     encoded = None
     try:
-        encoded = await encode_string({"chat_id": channel, "msg_id": msg_id})
+        encoded = await encode_string(
+            {"chat_id": channel, "msg_id": msg_id}
+        )
     except Exception:
         pass
 
-    default_id = extract_default_id(Backend.USE_DEFAULT_ID) or extract_default_id(filename)
+    default_id = extract_default_id(
+        Backend.USE_DEFAULT_ID
+    ) or extract_default_id(filename)
 
     if season:
-        return await fetch_tv_metadata(title, season, episode, encoded, year, quality, default_id)
+        return await fetch_tv_metadata(
+            title, season, episode, encoded, year, quality, default_id
+        )
 
-    return None
+    return await fetch_movie_metadata(
+        title, encoded, year, quality, default_id
+    )
 
 # -------------------------------------------------
 # TV METADATA (FIXED)
@@ -193,10 +212,10 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
     imdb_id = default_id if default_id and str(default_id).startswith("tt") else None
     tmdb_id = int(default_id) if default_id and str(default_id).isdigit() else None
 
-    # --- IMDb FIRST
     if not imdb_id and not tmdb_id:
         imdb_id = await safe_imdb_search(title, "tvSeries")
 
+    # ---- IMDb FIRST
     if imdb_id:
         try:
             imdb = await get_detail(imdb_id, "tvSeries")
@@ -231,9 +250,9 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
                 "encoded_string": encoded,
             }
         except Exception:
-            imdb_id = None  # FORCE TMDb
+            imdb_id = None
 
-    # --- TMDb FALLBACK
+    # ---- TMDB FALLBACK
     if not tmdb_id:
         res = await safe_tmdb_search(title, "tv", year)
         if not res:
@@ -245,7 +264,7 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
 
     still = (
         ep.still_path
-        or (ep.images.stills[0].file_path if ep and getattr(ep, "images", None) and ep.images.stills else None)
+        or (ep.images.stills[0].file_path if ep and ep.images.stills else None)
     )
 
     return {
@@ -268,6 +287,69 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
         "episode_backdrop": format_tmdb_image(still, "original") if still else "",
         "episode_overview": ep.overview if ep else "",
         "episode_released": ep.air_date.isoformat() if ep and ep.air_date else "",
+        "quality": quality,
+        "encoded_string": encoded,
+    }
+
+# -------------------------------------------------
+# MOVIE METADATA
+# -------------------------------------------------
+async def fetch_movie_metadata(title, encoded, year, quality, default_id):
+    imdb_id = default_id if default_id and str(default_id).startswith("tt") else None
+    tmdb_id = int(default_id) if default_id and str(default_id).isdigit() else None
+
+    if not imdb_id and not tmdb_id:
+        imdb_id = await safe_imdb_search(title, "movie")
+
+    # ---- IMDb FIRST
+    if imdb_id:
+        try:
+            imdb = await get_detail(imdb_id, "movie")
+            images = format_imdb_images(imdb_id)
+
+            return {
+                "tmdb_id": imdb.get("moviedb_id"),
+                "imdb_id": imdb_id,
+                "title": imdb.get("title", title),
+                "year": imdb.get("releaseDetailed", {}).get("year", 0),
+                "rate": imdb.get("rating", {}).get("star", 0),
+                "description": imdb.get("plot", ""),
+                "poster": images["poster"],
+                "backdrop": images["backdrop"],
+                "logo": images["logo"],
+                "genres": tur_genre_normalize(imdb.get("genre", [])),
+                "cast": imdb.get("cast", []),
+                "runtime": str(imdb.get("runtime") or ""),
+                "media_type": "movie",
+                "quality": quality,
+                "encoded_string": encoded,
+            }
+        except Exception:
+            imdb_id = None
+
+    # ---- TMDB FALLBACK
+    if not tmdb_id:
+        res = await safe_tmdb_search(title, "movie", year)
+        if not res:
+            return None
+        tmdb_id = res.id
+
+    movie = await _tmdb_movie_details(tmdb_id)
+
+    return {
+        "tmdb_id": movie.id,
+        "imdb_id": getattr(movie.external_ids, "imdb_id", None),
+        "title": movie.title,
+        "year": movie.release_date.year if movie.release_date else 0,
+        "rate": movie.vote_average or 0,
+        "description": movie.overview or "",
+        "poster": format_tmdb_image(movie.poster_path),
+        "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
+        "logo": get_tmdb_logo(movie.images),
+        "genres": tur_genre_normalize([g.name for g in movie.genres]),
+        "cast": [c.name for c in movie.credits.cast],
+        "runtime": f"{movie.runtime} min" if movie.runtime else "",
+        "media_type": "movie",
         "quality": quality,
         "encoded_string": encoded,
     }
