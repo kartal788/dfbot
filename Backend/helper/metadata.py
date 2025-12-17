@@ -260,6 +260,9 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
             ep = await get_season(imdb_id, season, episode)
             images = format_imdb_images(imdb_id)
 
+            # Bölüm başlığını çeviriyoruz
+            episode_title = translate_text_safe(ep.get("title", ""))
+
             return {
                 "tmdb_id": imdb.get("moviedb_id"),
                 "imdb_id": imdb_id,
@@ -277,7 +280,7 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
                 "media_type": "tv",
                 "season_number": season,
                 "episode_number": episode,
-                "episode_title": ep.get("title", ""),
+                "episode_title": episode_title,  # Çevrilmiş başlık
                 "episode_backdrop": ep.get("image", ""),
                 "episode_overview": translate_text_safe(ep.get("plot", "")),
                 "episode_released": to_iso_datetime(ep.get("released")),
@@ -298,6 +301,9 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
 
     still = ep.still_path if ep else None
 
+    # TMDB'den alınan bölüm başlığını çeviriyoruz
+    episode_title = translate_text_safe(ep.name) if ep else ""
+
     return {
         "tmdb_id": tv.id,
         "imdb_id": getattr(tv.external_ids, "imdb_id", None),
@@ -315,7 +321,7 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
         "media_type": "tv",
         "season_number": season,
         "episode_number": episode,
-        "episode_title": ep.name if ep else "",
+        "episode_title": episode_title,  # Çevrilmiş başlık
         "episode_backdrop": format_tmdb_image(still, "original") if still else "",
         "episode_overview": translate_text_safe(ep.overview) if ep else "",
         "episode_released": to_iso_datetime(ep.air_date) if ep else "",
