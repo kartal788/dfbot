@@ -221,6 +221,7 @@ async def meta(media_type: str, id: str):
                     "title": e.get("title"),
                     "season": s["season_number"],
                     "episode": e["episode_number"],
+                    "thumbnail": e.get("episode_backdrop") or "https://raw.githubusercontent.com/weebzone/Colab-Tools/refs/heads/main/no_episode_backdrop.png",
                     "released": e.get("released") or yesterday,
                     "overview": e.get("overview"),
                 })
