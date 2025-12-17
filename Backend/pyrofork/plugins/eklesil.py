@@ -236,29 +236,28 @@ async def ekle(client: Client, message: Message):
                 f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
             )
 
-# Eğer 3'ten fazla link eklenmişse, bilgileri dosyaya yazıyoruz
-else:
-    file_path = "eklenenler.txt"
-    with open(file_path, "w") as f:
-        for file_info in added_files:
-            f.write(file_info + "\n")
+    # Eğer 3'ten fazla link eklenmişse, bilgileri dosyaya yazıyoruz
+    else:
+        file_path = "eklenenler.txt"
+        with open(file_path, "w") as f:
+            for file_info in added_files:
+                f.write(file_info + "\n")
 
-    # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
-    await status.edit_text(
-        f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
-    )
-
-    # Dosyayı Telegram'a gönderiyoruz
-    with open(file_path, "rb") as file:
-        await client.send_document(
-            message.chat.id, 
-            file, 
-            caption=f"{len(args)} dosya eklendi."
+        # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
+        await status.edit_text(
+            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
         )
 
-    # Dosyayı gönderimden sonra siliyoruz
-    os.remove(file_path)
+        # Dosyayı Telegram'a gönderiyoruz
+        with open(file_path, "rb") as file:
+            await client.send_document(
+                message.chat.id, 
+                file, 
+                caption=f"{len(args)} dosya eklendi."
+            )
 
+        # Dosyayı gönderimden sonra siliyoruz
+        os.remove(file_path)
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
