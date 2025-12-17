@@ -135,6 +135,7 @@ async def manifest():
         "description": "Dizi ve film arşivim.",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
+        "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
         "catalogs": [
             {
                 "type": "movie",
