@@ -25,43 +25,6 @@ TRANSLATE_CACHE = {}
 API_SEMAPHORE = asyncio.Semaphore(12)
 
 # -------------------------------------------------
-# PLATFORM MAP (EKLENDİ)
-# -------------------------------------------------
-PLATFORM_ALIASES = {
-    "MAX": "Max",
-    "HBOMAX": "Max",
-    "HBO": "Max",
-    "BLUTV": "Max",
-
-    "TABII": "Tabii",
-    "TABİİ": "Tabii",
-
-    "NF": "Netflix",
-    "NETFLIX": "Netflix",
-
-    "DSNP": "Disney",
-    "DISNEY": "Disney",
-    "DISNEY+": "Disney",
-
-    "TOD": "Tod",
-    "TV+": "Tv+",
-    "EXXEN": "Exxen",
-    "GAIN": "Gain",
-
-    "AMZN": "Amazon",
-    "AMAZON": "Amazon",
-}
-
-def extract_platform(filename: str) -> str:
-    if not filename:
-        return ""
-    upper = filename.upper()
-    for key, value in PLATFORM_ALIASES.items():
-        if re.search(rf"\b{re.escape(key)}\b", upper):
-            return value
-    return ""
-
-# -------------------------------------------------
 # GENRE NORMALIZATION
 # -------------------------------------------------
 GENRE_TUR_ALIASES = {
@@ -268,24 +231,23 @@ async def metadata(filename, channel, msg_id):
     if season and not episode:
         return None
 
-    platform = extract_platform(filename)
     encoded = await encode_string({"chat_id": channel, "msg_id": msg_id})
 
     default_id = extract_default_id(Backend.USE_DEFAULT_ID) or extract_default_id(filename)
 
     if season:
         return await fetch_tv_metadata(
-            title, season, episode, encoded, year, quality, platform, default_id
+            title, season, episode, encoded, year, quality, default_id
         )
 
     return await fetch_movie_metadata(
-        title, encoded, year, quality, platform, default_id
+        title, encoded, year, quality, default_id
     )
 
 # -------------------------------------------------
 # TV METADATA
 # -------------------------------------------------
-async def fetch_tv_metadata(title, season, episode, encoded, year, quality, platform, default_id):
+async def fetch_tv_metadata(title, season, episode, encoded, year, quality, default_id):
     imdb_id = default_id if default_id and str(default_id).startswith("tt") else None
     tmdb_id = int(default_id) if default_id and str(default_id).isdigit() else None
 
@@ -319,7 +281,6 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, plat
                 "episode_backdrop": ep.get("image", ""),
                 "episode_overview": translate_text_safe(ep.get("plot", "")),
                 "episode_released": to_iso_datetime(ep.get("released")),
-                "platform": platform,
                 "quality": quality,
                 "encoded_string": encoded,
             }
@@ -358,7 +319,6 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, plat
         "episode_backdrop": format_tmdb_image(still, "original") if still else "",
         "episode_overview": translate_text_safe(ep.overview) if ep else "",
         "episode_released": to_iso_datetime(ep.air_date) if ep else "",
-        "platform": platform,
         "quality": quality,
         "encoded_string": encoded,
     }
@@ -366,7 +326,7 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, plat
 # -------------------------------------------------
 # MOVIE METADATA
 # -------------------------------------------------
-async def fetch_movie_metadata(title, encoded, year, quality, platform, default_id):
+async def fetch_movie_metadata(title, encoded, year, quality, default_id):
     imdb_id = default_id if default_id and str(default_id).startswith("tt") else None
     tmdb_id = int(default_id) if default_id and str(default_id).isdigit() else None
 
@@ -393,7 +353,6 @@ async def fetch_movie_metadata(title, encoded, year, quality, platform, default_
                 "cast": imdb.get("cast", []),
                 "runtime": str(imdb.get("runtime") or ""),
                 "media_type": "movie",
-                "platform": platform,
                 "quality": quality,
                 "encoded_string": encoded,
             }
@@ -423,7 +382,6 @@ async def fetch_movie_metadata(title, encoded, year, quality, platform, default_
         "cast": [c.name for c in movie.credits.cast],
         "runtime": f"{movie.runtime} min" if movie.runtime else "",
         "media_type": "movie",
-        "platform": platform,
         "quality": quality,
         "encoded_string": encoded,
     }
