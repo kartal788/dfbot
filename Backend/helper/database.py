@@ -13,6 +13,16 @@ from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, Season, TVShowSchema
 from Backend.helper.task_manager import delete_message
 
+def normalize_platform(platform) -> List[str]:
+    if not platform:
+        return []
+    if isinstance(platform, list):
+        return list(set(platform))
+    if isinstance(platform, str):
+        return [platform]
+    return []
+
+
 
 def convert_objectid_to_str(document: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in document.items():
