@@ -214,22 +214,6 @@ async def ekle(client: Client, message: Message):
     # Sending the final message with success/failure results
     await status.edit_text(message_text)
 
-        except Exception as e:
-            LOGGER.exception(e)
-            await status.edit_text(
-                "❌ **EKLEME BAŞARISIZ**\n\n"
-                f"📛 Hata: `{type(e).__name__}`\n"
-                f"📄 Açıklama: `{str(e)}`\n\n"
-                "🔎 Olası nedenler:\n"
-                "- Dosya adı parse edilemedi\n"
-                "- IMDb / TMDB eşleşmesi bulunamadı\n"
-                "- metadata.py None döndürdü\n"
-                "- Pixeldrain erişim sorunu"
-            )
-            break  # Eğer bir dosyada hata olursa, döngü durdurulabilir
-
-    await status.edit_text("✅ **Tüm dosyalar başarıyla işlendi**")
-
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
 
@@ -281,4 +265,3 @@ async def sil_onay(client: Client, message: Message):
         )
     else:
         await message.reply_text("❌ Silme işlemi iptal edildi.")
-
