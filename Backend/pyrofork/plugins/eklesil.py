@@ -215,29 +215,29 @@ async def ekle(client: Client, message: Message):
                 "- Pixeldrain erişim sorunu"
             )
 
-# Eğer 2'den fazla link eklenmişse, bilgileri dosyaya yazıyoruz
-if len(args) > 2:
-    file_path = "eklenenler.txt"
-    with open(file_path, "w") as f:
-        for file_info in added_files:
-            f.write(file_info + "\n")
+    # Eğer 2'den fazla link eklenmişse, bilgileri dosyaya yazıyoruz
+    if len(args) > 2:
+        file_path = "eklenenler.txt"
+        with open(file_path, "w") as f:
+            for file_info in added_files:
+                f.write(file_info + "\n")
 
-    # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
-    await status.edit_text(
-        f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
-        "Dosyayı kontrol edebilirsiniz."
-    )
-
-    # Dosyayı Telegram'a gönderiyoruz
-    with open(file_path, "rb") as file:
-        await client.send_document(
-            message.chat.id, 
-            file, 
-            caption="İşte eklenen dosyalarla ilgili bilgiler:"
+        # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
+        await status.edit_text(
+            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
+            "Dosyayı kontrol edebilirsiniz."
         )
-    
-    # Dosyayı gönderimden sonra siliyoruz
-    os.remove(file_path)
+
+        # Dosyayı Telegram'a gönderiyoruz
+        with open(file_path, "rb") as file:
+            await client.send_document(
+                message.chat.id, 
+                file, 
+                caption="İşte eklenen dosyalarla ilgili bilgiler:"
+            )
+        
+        # Dosyayı gönderimden sonra siliyoruz
+        os.remove(file_path)
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
@@ -264,8 +264,8 @@ async def sil(client: Client, message: Message):
     )
 
 @Client.on_message(
-    filters.private &
-    CustomFilters.owner &
+    filters.private & 
+    CustomFilters.owner & 
     filters.regex("(?i)^(evet|hayır)$")
 )
 async def sil_onay(client: Client, message: Message):
