@@ -62,224 +62,141 @@ async def filesize(url):
 # ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
-    args = message.command[1:]  # Kullanıcıdan gelen komut parametrelerini alıyoruz
+
+    args = message.command[1:]
     if not args:
-        return await message.reply_text("Kullanım: /ekle pixeldrain_link [pixeldrain_link_2] ...")
+        return await message.reply_text("Kullanım: /ekle pixeldrain_link")
 
-    status = await message.reply_text("📥 Metadata alınıyor...")  # Status mesajını gönderiyoruz
-    current_status = "📥 Metadata alınıyor..."  # İlk mesaj
-    reply_message = []  # Çıktı mesajlarını depolayacağımız liste
-    added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
-    processed_files = 0  # İşlenen dosya sayısı
+    status = await message.reply_text("📥 Metadata alınıyor...")
+    raw_link = args[0]
 
-    # ----------------- Update mesajı 1 saniyede bir -----------------
-    async def update_status(status, current_status, total_files, processed_files):
-        last_status = current_status  # Son durumu takip ediyoruz
+    try:
+        api_link = pixeldrain_to_api(raw_link)
+        filename = await filename_from_url(api_link)
+        size = await filesize(api_link)
 
-        while processed_files < total_files:
-            await asyncio.sleep(20)  # Her 1 saniyede bir
-            progress = processed_files / total_files
-            progress_bar = create_progress_bar(progress)
-            percentage = round(progress * 100, 2)  # Yüzdeyi hesaplıyoruz
-
-            new_status = f"📥 Metadata alınıyor... {progress_bar} {percentage}%"
-
-            if new_status != last_status:  # İçerik değiştiyse sadece güncelleniyor
-                current_status = new_status
-                await status.edit_text(current_status)
-                last_status = new_status  # Last status'ı yeni duruma güncelliyoruz
-
-    # Fonksiyonu başlatıyoruz
-    asyncio.create_task(update_status(status, current_status, len(args), processed_files))
-
-    # Linkleri işleme kısmı
-    for i, raw_link in enumerate(args):
-        try:
-            api_link = pixeldrain_to_api(raw_link)
-            filename = await filename_from_url(api_link)
-            size = await filesize(api_link)
-
-            # 🔴 METADATA.PY ÇAĞRISI
-            meta = await metadata(
-                filename=filename,
-                channel=message.chat.id,
-                msg_id=message.id
-            )
-
-            if not meta:
-                raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
-
-            # ----------------- MOVIE -----------------
-            if meta["media_type"] == "movie":
-                col = movie_col
-                doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
-
-                telegram_obj = {
-                    "quality": meta["quality"],
-                    "id": api_link,
-                    "name": filename,
-                    "size": size
-                }
-
-                if not doc:
-                    doc = {
-                        "tmdb_id": meta["tmdb_id"],
-                        "imdb_id": meta["imdb_id"],
-                        "db_index": 1,
-                        "title": meta["title"],
-                        "genres": meta["genres"],
-                        "description": meta["description"],
-                        "rating": meta["rate"],
-                        "release_year": meta["year"],
-                        "poster": meta["poster"],
-                        "backdrop": meta["backdrop"],
-                        "logo": meta["logo"],
-                        "cast": meta["cast"],
-                        "runtime": meta["runtime"],
-                        "media_type": "movie",
-                        "updated_on": str(datetime.utcnow()),
-                        "telegram": [telegram_obj]
-                    }
-                    await col.insert_one(doc)
-                else:
-                    doc["telegram"].append(telegram_obj)
-                    doc["updated_on"] = str(datetime.utcnow())
-                    await col.replace_one({"_id": doc["_id"]}, doc)
-
-            # ----------------- TV -----------------
-            else:
-                col = series_col
-                doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
-
-                telegram_obj = {
-                    "quality": meta["quality"],
-                    "id": api_link,
-                    "name": filename,
-                    "size": size
-                }
-
-                episode_obj = {
-                    "episode_number": meta["episode_number"],
-                    "title": meta["episode_title"],
-                    "episode_backdrop": meta["episode_backdrop"],
-                    "overview": meta["episode_overview"],
-                    "released": meta["episode_released"],
-                    "telegram": [telegram_obj]
-                }
-
-                if not doc:
-                    doc = {
-                        "tmdb_id": meta["tmdb_id"],
-                        "imdb_id": meta["imdb_id"],
-                        "db_index": 1,
-                        "title": meta["title"],
-                        "genres": meta["genres"],
-                        "description": meta["description"],
-                        "rating": meta["rate"],
-                        "release_year": meta["year"],
-                        "poster": meta["poster"],
-                        "backdrop": meta["backdrop"],
-                        "logo": meta["logo"],
-                        "cast": meta["cast"],
-                        "runtime": meta["runtime"],
-                        "media_type": "tv",
-                        "updated_on": str(datetime.utcnow()),
-                        "seasons": [{
-                            "season_number": meta["season_number"],
-                            "episodes": [episode_obj]
-                        }]
-                    }
-                    await col.insert_one(doc)
-                else:
-                    season = next(
-                        (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
-                        None
-                    )
-                    if not season:
-                        season = {
-                            "season_number": meta["season_number"],
-                            "episodes": []
-                        }
-                        doc["seasons"].append(season)
-
-                    season["episodes"].append(episode_obj)
-                    doc["updated_on"] = str(datetime.utcnow())
-                    await col.replace_one({"_id": doc["_id"]}, doc)
-
-            # İşlem bitince ilerlemeyi güncelliyoruz
-            processed_files += 1
-
-        except Exception as e:
-            LOGGER.exception(e)
-            reply_message.append(
-                "❌ **EKLEME BAŞARISIZ**\n\n"
-                f"📛 Hata: `{type(e).__name__}`\n"
-                f"📄 Açıklama: `{str(e)}`\n\n"
-                "🔎 Olası nedenler:\n"
-                "- Dosya adı parse edilemedi\n"
-                "- IMDb / TMDB eşleşmesi bulunamadı\n"
-                "- metadata.py None döndürdü\n"
-                "- Pixeldrain erişim sorunu"
-            )
-
-    # İşlem tamamlandıktan sonra, bir bilgilendirme mesajı göndereceğiz
-    await status.edit_text("✅ Ekleme işlemi başarıyla tamamlandı!")
-
-
-# ----------------- İlerleme Çubuğu -----------------
-def create_progress_bar(progress):
-    total_blocks = 12  # İlerleme çubuğunda kaç blok olacak (⬢⬡ toplam 12 blok)
-    filled_blocks = int(progress * total_blocks)  # Dolu blok sayısı
-    empty_blocks = total_blocks - filled_blocks  # Boş blok sayısı
-
-    # Dolu ve boş blokları oluşturuyoruz
-    progress_bar = "⬢" * filled_blocks + "⬡" * empty_blocks
-    return progress_bar
-
-
-    # Eğer 2 veya daha az link eklenmişse, dosya bilgilerini Telegram'a gönderiyoruz
-    if len(args) <= 2:
-        # Status mesajı düzenleniyor
-        await status.edit_text("📥 Metadata alınıyor...")
-
-        # Her dosya bilgisi Telegram mesajı olarak gönderiliyor
-        for index, message_info in enumerate(reply_message):
-            # 15 saniye arayla gönderim yapıyoruz
-            if index > 0:  # İlk gönderim dışında bekleme yapıyoruz
-                await asyncio.sleep(30)  # 15 saniye bekleme
-
-            # Mesajı düzenliyoruz
-            await status.edit_text(
-                f"{message_info}\n\n"
-                f"{titles}\n"
-                f"📄 **Ad**: {filename}\n"
-                f"📊 **Boyut**: {size}\n"
-                f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
-            )
-
-    # Eğer 3'ten fazla link eklenmişse, bilgileri dosyaya yazıyoruz
-    else:
-        file_path = "eklenenler.txt"
-        with open(file_path, "w") as f:
-            for file_info in added_files:
-                f.write(file_info + "\n")
-
-        # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
-        await status.edit_text(
-            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
+        # 🔴 METADATA.PY ÇAĞRISI
+        meta = await metadata(
+            filename=filename,
+            channel=message.chat.id,
+            msg_id=message.id
         )
 
-        # Dosyayı Telegram'a gönderiyoruz
-        with open(file_path, "rb") as file:
-            await client.send_document(
-                message.chat.id, 
-                file, 
-                caption=f"{len(args)} dosya eklendi."
-            )
+        if not meta:
+            raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
 
-        # Dosyayı gönderimden sonra siliyoruz
-        os.remove(file_path)
+        # ----------------- MOVIE -----------------
+        if meta["media_type"] == "movie":
+            col = movie_col
+            doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
 
+            telegram_obj = {
+                "quality": meta["quality"],
+                "id": api_link,
+                "name": filename,
+                "size": size
+            }
+
+            if not doc:
+                doc = {
+                    "tmdb_id": meta["tmdb_id"],
+                    "imdb_id": meta["imdb_id"],
+                    "db_index": 1,
+                    "title": meta["title"],
+                    "genres": meta["genres"],
+                    "description": meta["description"],
+                    "rating": meta["rate"],
+                    "release_year": meta["year"],
+                    "poster": meta["poster"],
+                    "backdrop": meta["backdrop"],
+                    "logo": meta["logo"],
+                    "cast": meta["cast"],
+                    "runtime": meta["runtime"],
+                    "media_type": "movie",
+                    "updated_on": str(datetime.utcnow()),
+                    "telegram": [telegram_obj]
+                }
+                await col.insert_one(doc)
+            else:
+                doc["telegram"].append(telegram_obj)
+                doc["updated_on"] = str(datetime.utcnow())
+                await col.replace_one({"_id": doc["_id"]}, doc)
+
+        # ----------------- TV -----------------
+        else:
+            col = series_col
+            doc = await col.find_one({"tmdb_id": meta["tmdb_id"]})
+
+            telegram_obj = {
+                "quality": meta["quality"],
+                "id": api_link,
+                "name": filename,
+                "size": size
+            }
+
+            episode_obj = {
+                "episode_number": meta["episode_number"],
+                "title": meta["episode_title"],
+                "episode_backdrop": meta["episode_backdrop"],
+                "overview": meta["episode_overview"],
+                "released": meta["episode_released"],
+                "telegram": [telegram_obj]
+            }
+
+            if not doc:
+                doc = {
+                    "tmdb_id": meta["tmdb_id"],
+                    "imdb_id": meta["imdb_id"],
+                    "db_index": 1,
+                    "title": meta["title"],
+                    "genres": meta["genres"],
+                    "description": meta["description"],
+                    "rating": meta["rate"],
+                    "release_year": meta["year"],
+                    "poster": meta["poster"],
+                    "backdrop": meta["backdrop"],
+                    "logo": meta["logo"],
+                    "cast": meta["cast"],
+                    "runtime": meta["runtime"],
+                    "media_type": "tv",
+                    "updated_on": str(datetime.utcnow()),
+                    "seasons": [{
+                        "season_number": meta["season_number"],
+                        "episodes": [episode_obj]
+                    }]
+                }
+                await col.insert_one(doc)
+
+            else:
+                season = next(
+                    (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
+                    None
+                )
+                if not season:
+                    season = {
+                        "season_number": meta["season_number"],
+                        "episodes": []
+                    }
+                    doc["seasons"].append(season)
+
+                season["episodes"].append(episode_obj)
+                doc["updated_on"] = str(datetime.utcnow())
+                await col.replace_one({"_id": doc["_id"]}, doc)
+
+        await status.edit_text("✅ **Ekleme başarılı**")
+
+    except Exception as e:
+        LOGGER.exception(e)
+        await status.edit_text(
+            "❌ **EKLEME BAŞARISIZ**\n\n"
+            f"📛 Hata: `{type(e).__name__}`\n"
+            f"📄 Açıklama: `{str(e)}`\n\n"
+            "🔎 Olası nedenler:\n"
+            "- Dosya adı parse edilemedi\n"
+            "- IMDb / TMDB eşleşmesi bulunamadı\n"
+            "- metadata.py None döndürdü\n"
+            "- Pixeldrain erişim sorunu"
+        )
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
@@ -306,8 +223,8 @@ async def sil(client: Client, message: Message):
     )
 
 @Client.on_message(
-    filters.private & 
-    CustomFilters.owner & 
+    filters.private &
+    CustomFilters.owner &
     filters.regex("(?i)^(evet|hayır)$")
 )
 async def sil_onay(client: Client, message: Message):
@@ -332,3 +249,4 @@ async def sil_onay(client: Client, message: Message):
         )
     else:
         await message.reply_text("❌ Silme işlemi iptal edildi.")
+
