@@ -68,23 +68,37 @@ async def ekle(client: Client, message: Message):
 
     status = await message.reply_text("📥 Metadata alınıyor...")
 
-    added_files = []  # List of successfully added files
-    failed_files = []  # List of failed files
-    movie_count = 0  # Number of movies added
-    series_count = 0  # Number of series added
+    added_files = []  # Başarıyla eklenen dosyaların listesi
+    failed_files = []  # Başarısız olan dosyaların listesi
+    movie_count = 0  # Eklenen film sayısı
+    series_count = 0  # Eklenen dizi sayısı
 
     for raw_link in args:
         try:
+            # Pixeldrain linkini API linkine çevir
             api_link = pixeldrain_to_api(raw_link)
             filename = await filename_from_url(api_link)
             size = await filesize(api_link)
 
-            # 🔴 METADATA.PY ÇAĞRISI
-            meta = await metadata(
-                filename=filename,
-                channel=message.chat.id,
-                msg_id=message.id
-            )
+            # Linkle birlikte dosya ismi, TMDB ID, veya IMDB ID verilmişse, bunlarla metadata sorgusu yapalım
+            meta = None
+            for info in args[1:]:  # İlk argüman Pixeldrain linki olduğu için, geri kalanlar metadata bilgisi olabilir
+                if re.match(r"^tt\d+$", info):  # IMDB ID formatı: tt1234567
+                    meta = await metadata(imdb_id=info, channel=message.chat.id, msg_id=message.id)
+                    if meta:
+                        break
+                elif re.match(r"^\d+$", info):  # TMDB ID formatı: 123456
+                    meta = await metadata(tmdb_id=info, channel=message.chat.id, msg_id=message.id)
+                    if meta:
+                        break
+                else:  # Eğer bir dosya ismi verilmişse, isme göre metadata araştıralım
+                    meta = await metadata(title=info, channel=message.chat.id, msg_id=message.id)
+                    if meta:
+                        break
+
+            # Eğer metadata hala bulunamadıysa, Pixeldrain linkinden metadata alalım
+            if not meta:
+                meta = await metadata(filename=filename, channel=message.chat.id, msg_id=message.id)
 
             if not meta:
                 raise ValueError("metadata.py veri döndürmedi (parse / eşleşme hatası)")
@@ -196,22 +210,18 @@ async def ekle(client: Client, message: Message):
         except Exception as e:
             LOGGER.exception(e)
             failed_files.append(filename)
-            continue  # Skip to the next file on failure
+            continue  # Hata durumunda bir sonraki dosyaya geç
 
-    # Wait for at least 15 seconds before sending the final message
+    # Son olarak eklenen ve başarısız olan dosyaların bildirilmesi
     await asyncio.sleep(15)
 
-    # Preparing the final message
     if len(added_files) <= 10:
-        # If there are 10 or fewer files, list them
         added_message = "\n".join([f"{i+1}) {file}" for i, file in enumerate(added_files)])
         failed_message = "\n".join([f"{i+1}) {file}" for i, file in enumerate(failed_files)])
         message_text = f"Eklenenler:\n{added_message}\n\nBaşarısız:\n{failed_message}"
     else:
-        # If there are more than 10 files, summarize by category
         message_text = f"Eklenenler:\nFilm: {movie_count}\nDizi: {series_count}"
 
-    # Sending the final message with success/failure results
     await status.edit_text(message_text)
 
 # ----------------- /SİL -----------------
@@ -239,8 +249,8 @@ async def sil(client: Client, message: Message):
     )
 
 @Client.on_message(
-    filters.private &
-    CustomFilters.owner &
+    filters.private & 
+    CustomFilters.owner & 
     filters.regex("(?i)^(evet|hayır)$")
 )
 async def sil_onay(client: Client, message: Message):
