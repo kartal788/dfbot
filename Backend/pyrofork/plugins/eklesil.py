@@ -60,8 +60,6 @@ async def filesize(url):
     return "YOK"
 
 # ----------------- /EKLE -----------------
-import os
-
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     args = message.command[1:]  # Kullanıcıdan gelen komut parametrelerini alıyoruz
@@ -226,11 +224,13 @@ async def ekle(client: Client, message: Message):
 
         # Dosyanın yolu ve adı ile kullanıcıyı bilgilendiriyoruz
         await status.edit_text(
-            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı."
+            f"✅ **Ekleme başarılı**\n\n{len(args)} dosya eklendi. Dosya bilgileri 'eklenenler.txt' dosyasına yazıldı.\n\n"
+            "Dosyayı kontrol edebilirsiniz."
         )
     else:
         # Eğer 2'den az link varsa, kullanıcıya doğrudan mesaj gönderiyoruz
         await status.edit_text(f"✅ **Ekleme başarılı**\n\n{''.join(reply_message)}")
+
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
