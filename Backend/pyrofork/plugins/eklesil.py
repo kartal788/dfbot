@@ -199,27 +199,54 @@ async def ekle(client: Client, message: Message):
         )
 
 # ----------------- /SİL -----------------
+awaiting_confirmation = {}
+
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
 async def sil(client: Client, message: Message):
-    awaiting_confirmation[message.from_user.id] = True
+    uid = message.from_user.id
+
+    movie_count = await movie_col.count_documents({})
+    tv_count = await series_col.count_documents({})
+
+    if movie_count == 0 and tv_count == 0:
+        return await message.reply_text("ℹ️ Veritabanı zaten boş.")
+
+    awaiting_confirmation[uid] = True
+
     await message.reply_text(
-        "⚠️ TÜM VERİLER SİLİNECEK\n\n"
-        "Onay için **Evet**, iptal için **Hayır** yaz"
+        "⚠️ **TÜM VERİLER SİLİNECEK** ⚠️\n\n"
+        "Bu işlem geri alınamaz.\n\n"
+        f"🎬 Filmler: `{movie_count}`\n"
+        f"📺 Diziler: `{tv_count}`\n\n"
+        "Onaylamak için **Evet** yaz.\n"
+        "İptal etmek için **Hayır** yaz."
     )
 
-@Client.on_message(filters.private & CustomFilters.owner & filters.regex("(?i)^(evet|hayır)$"))
+@Client.on_message(
+    filters.private &
+    CustomFilters.owner &
+    filters.regex("(?i)^(evet|hayır)$")
+)
 async def sil_onay(client: Client, message: Message):
     uid = message.from_user.id
+
     if uid not in awaiting_confirmation:
         return
 
     awaiting_confirmation.pop(uid)
 
     if message.text.lower() == "evet":
-        m = await movie_col.count_documents({})
-        s = await series_col.count_documents({})
+        movie_deleted = await movie_col.count_documents({})
+        tv_deleted = await series_col.count_documents({})
+
         await movie_col.delete_many({})
         await series_col.delete_many({})
-        await message.reply_text(f"✅ Silindi\n🎬 {m} | 📺 {s}")
+
+        await message.reply_text(
+            "✅ **Silme işlemi tamamlandı**\n\n"
+            f"🎬 Silinen filmler: `{movie_deleted}`\n"
+            f"📺 Silinen diziler: `{tv_deleted}`"
+        )
     else:
-        await message.reply_text("❌ İptal edildi")
+        await message.reply_text("❌ Silme işlemi iptal edildi.")
+
