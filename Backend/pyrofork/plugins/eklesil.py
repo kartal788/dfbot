@@ -239,11 +239,6 @@ if len(args) > 2:
     # Dosyayı gönderimden sonra siliyoruz
     os.remove(file_path)
 
-    else:
-        # Eğer 2'den az link varsa, kullanıcıya doğrudan mesaj gönderiyoruz
-        await status.edit_text(f"✅ **Ekleme başarılı**\n\n{''.join(reply_message)}")
-
-
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
 
