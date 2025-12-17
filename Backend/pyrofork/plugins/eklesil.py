@@ -168,7 +168,14 @@ async def ekle(client: Client, message: Message):
                     }
                     await movie_col.insert_one(doc)
                 else:
-                    doc["telegram"].append(telegram_obj)
+                    updated = False
+                    for t in doc["telegram"]:
+                        if str(t["id"]).startswith("http") and t["name"] == meta_filename:
+                            t.update(telegram_obj)
+                            updated = True
+                            break
+                    if not updated:
+                        doc["telegram"].append(telegram_obj)
                     doc["updated_on"] = str(datetime.utcnow())
                     await movie_col.replace_one({"_id": doc["_id"]}, doc)
                 movie_count += 1
@@ -213,7 +220,20 @@ async def ekle(client: Client, message: Message):
                     if not season:
                         season = {"season_number": meta["season_number"], "episodes": []}
                         doc["seasons"].append(season)
-                    season["episodes"].append(episode_obj)
+
+                    existing_ep = next((e for e in season["episodes"] if e["title"] == meta_filename), None)
+                    if existing_ep:
+                        updated = False
+                        for t in existing_ep["telegram"]:
+                            if str(t["id"]).startswith("http"):
+                                t.update(telegram_obj)
+                                updated = True
+                                break
+                        if not updated:
+                            existing_ep["telegram"].append(telegram_obj)
+                    else:
+                        season["episodes"].append(episode_obj)
+
                     doc["updated_on"] = str(datetime.utcnow())
                     await series_col.replace_one({"_id": doc["_id"]}, doc)
                 series_count += 1
@@ -234,6 +254,7 @@ async def ekle(client: Client, message: Message):
         result_text = f"✅ İşlem tamamlandı\n\n{movies_text}\n{series_text}\n❌ Hatalı: {len(failed)}"
 
     await status.edit_text(result_text)
+
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
