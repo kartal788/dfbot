@@ -60,6 +60,7 @@ async def filesize(url):
     return "YOK"
 
 # ----------------- /EKLE -----------------
+# ----------------- /EKLE -----------------
 @Client.on_message(filters.command("ekle") & filters.private & CustomFilters.owner)
 async def ekle(client: Client, message: Message):
     args = message.command[1:]  # Kullanıcıdan gelen komut parametrelerini alıyoruz
@@ -215,26 +216,26 @@ async def ekle(client: Client, message: Message):
                 "- Pixeldrain erişim sorunu"
             )
 
-# Eğer 2 veya daha az link eklenmişse, dosya bilgilerini Telegram'a gönderiyoruz
-if len(args) <= 2:
-    # Status mesajı düzenleniyor
-    await status.edit_text("📥 Metadata alınıyor...")
+    # Eğer 2 veya daha az link eklenmişse, dosya bilgilerini Telegram'a gönderiyoruz
+    if len(args) <= 2:
+        # Status mesajı düzenleniyor
+        await status.edit_text("📥 Metadata alınıyor...")
 
-    # Her dosya bilgisi Telegram mesajı olarak gönderiliyor
-    for index, message_info in enumerate(reply_message):
-        # 15 saniye arayla gönderim yapıyoruz
-        if index > 0:  # İlk gönderim dışında bekleme yapıyoruz
-            await asyncio.sleep(15)  # 15 saniye bekleme
-        
-        # Mesajı düzenliyoruz
-        await status.edit_text(
-            f"{message_info}\n\n"
-            f"{titles}\n"
-            f"📄 **Ad**: {filename}\n"
-            f"📊 **Boyut**: {size}\n"
-            f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
-        )
-    
+        # Her dosya bilgisi Telegram mesajı olarak gönderiliyor
+        for index, message_info in enumerate(reply_message):
+            # 15 saniye arayla gönderim yapıyoruz
+            if index > 0:  # İlk gönderim dışında bekleme yapıyoruz
+                await asyncio.sleep(15)  # 15 saniye bekleme
+
+            # Mesajı düzenliyoruz
+            await status.edit_text(
+                f"{message_info}\n\n"
+                f"{titles}\n"
+                f"📄 **Ad**: {filename}\n"
+                f"📊 **Boyut**: {size}\n"
+                f"🔧 **Kalite**: {meta.get('quality', 'Bilgi Yok')}"
+            )
+
 # Eğer 3'ten fazla link eklenmişse, bilgileri dosyaya yazıyoruz
 else:
     file_path = "eklenenler.txt"
