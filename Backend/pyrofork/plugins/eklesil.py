@@ -68,9 +68,6 @@ async def ekle(client: Client, message: Message):
 
     status = await message.reply_text("📥 Metadata alınıyor...")
 
-    # Dosyaların bilgilerini kaydedeceğimiz bir liste
-    added_files = []
-
     for raw_link in args:
         try:
             api_link = pixeldrain_to_api(raw_link)
@@ -185,9 +182,8 @@ async def ekle(client: Client, message: Message):
                     doc["updated_on"] = str(datetime.utcnow())
                     await col.replace_one({"_id": doc["_id"]}, doc)
 
-            # Dosya bilgisini eklenenler.txt'ye kaydediyoruz
-            file_info = f"🎬 Başlık: {meta['title']}\n📄 Ad: {filename}\n📊 Boyut: {size}\n🔧 Kalite: {meta['quality']}\n\n"
-            added_files.append(file_info)
+            # Feedback for each successful file processed
+            await status.edit_text(f"✅ **{filename}** başarıyla eklendi!")
 
         except Exception as e:
             LOGGER.exception(e)
@@ -203,45 +199,7 @@ async def ekle(client: Client, message: Message):
             )
             break  # Eğer bir dosyada hata olursa, döngü durdurulabilir
 
-    # Eğer 2'den fazla dosya eklenmişse, bunları "/tmp/eklenenler.txt" dosyasına yazalım
-    if len(added_files) > 1:
-        # Dosyaları "/tmp/eklenenler.txt" dosyasına yazıyoruz
-        tmp_file_path = "/tmp/eklenenler.txt"
-        with open(tmp_file_path, "w") as file:
-            file.writelines(added_files)
-
-        # Dosyayı Telegram'a gönderelim
-        await client.send_document(
-            chat_id=message.chat.id,
-            document=tmp_file_path,
-            caption="Ekleme başarılı! İşte eklenen dosyalar."
-        )
-
-        # Dosyayı Telegram'a gönderdikten sonra sil
-        os.remove(tmp_file_path)
-
-        # Dosyalar 15 saniye arayla gönderilecek
-        for file_info in added_files:
-            await message.reply_text(f"✅ **Ekleme başarılı**\n\n{file_info}")
-            await asyncio.sleep(15)  # 15 saniye bekle
-
-    else:
-        # Tek dosya eklenmişse, hemen ekleyelim
-        await status.edit_text("✅ **Ekleme başarılı**")
-
-
-    except Exception as e:
-        LOGGER.exception(e)
-        await status.edit_text(
-            "❌ **EKLEME BAŞARISIZ**\n\n"
-            f"📛 Hata: `{type(e).__name__}`\n"
-            f"📄 Açıklama: `{str(e)}`\n\n"
-            "🔎 Olası nedenler:\n"
-            "- Dosya adı parse edilemedi\n"
-            "- IMDb / TMDB eşleşmesi bulunamadı\n"
-            "- metadata.py None döndürdü\n"
-            "- Pixeldrain erişim sorunu"
-        )
+    await status.edit_text("✅ **Tüm dosyalar başarıyla işlendi**")
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
