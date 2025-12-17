@@ -66,14 +66,15 @@ async def ekle(client: Client, message: Message):
     if not args:
         return await message.reply_text("Kullanım: /ekle pixeldrain_link [pixeldrain_link_2] ...")
 
-    status = await message.reply_text("📥 Metadata alınıyor...")
+    status = await message.reply_text("📥 Metadata alınıyor...")  # Status mesajını gönderiyoruz
     current_status = "📥 Metadata alınıyor..."  # İlk mesaj
     reply_message = []  # Çıktı mesajlarını depolayacağımız liste
     added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
+    processed_files = 0  # İşlenen dosya sayısı
 
     # ----------------- Update mesajı 1 saniyede bir -----------------
     async def update_status(status, current_status, total_files, processed_files):
-        last_status = current_status  # Track the last status
+        last_status = current_status  # Son durumu takip ediyoruz
 
         while processed_files < total_files:
             await asyncio.sleep(20)  # Her 1 saniyede bir
@@ -83,13 +84,13 @@ async def ekle(client: Client, message: Message):
 
             new_status = f"📥 Metadata alınıyor... {progress_bar} {percentage}%"
 
-            if new_status != last_status:  # Only update if content has changed
+            if new_status != last_status:  # İçerik değiştiyse sadece güncelleniyor
                 current_status = new_status
                 await status.edit_text(current_status)
-                last_status = new_status  # Update last_status to the new one
+                last_status = new_status  # Last status'ı yeni duruma güncelliyoruz
 
     # Fonksiyonu başlatıyoruz
-    asyncio.create_task(update_status(status, current_status, len(args), 0))
+    asyncio.create_task(update_status(status, current_status, len(args), processed_files))
 
     # Linkleri işleme kısmı
     for i, raw_link in enumerate(args):
@@ -223,6 +224,7 @@ async def ekle(client: Client, message: Message):
 
     # İşlem tamamlandıktan sonra, bir bilgilendirme mesajı göndereceğiz
     await status.edit_text("✅ Ekleme işlemi başarıyla tamamlandı!")
+
 
 # ----------------- İlerleme Çubuğu -----------------
 def create_progress_bar(progress):
