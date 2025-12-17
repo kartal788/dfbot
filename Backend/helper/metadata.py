@@ -14,7 +14,6 @@ from Backend.helper.encrypt import encode_string
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
-DELAY = 0
 tmdb = aioTMDb(key=Telegram.TMDB_API, language="en-US", region="US")
 
 IMDB_CACHE = {}
@@ -25,7 +24,7 @@ EPISODE_CACHE = {}
 API_SEMAPHORE = asyncio.Semaphore(12)
 
 # -------------------------------------------------
-# GENRE /tur NORMALIZATION
+# GENRE NORMALIZATION
 # -------------------------------------------------
 GENRE_TUR_ALIASES = {
     "action": "Aksiyon",
@@ -45,11 +44,9 @@ GENRE_TUR_ALIASES = {
     "thriller": "Gerilim",
     "war": "Savaş",
     "western": "Vahşi Batı",
-
     "science fiction": "Bilim Kurgu",
     "sci fi": "Bilim Kurgu",
     "sci-fi": "Bilim Kurgu",
-
     "tv movie": "TV Filmi",
 }
 
@@ -58,31 +55,26 @@ def tur_genre_normalize(genres):
         return []
     out = []
     for g in genres:
-        if not g:
-            continue
-        key = g.lower().strip().replace("-", " ").replace("_", " ")
-        out.append(GENRE_TUR_ALIASES.get(key, g))
+        if g:
+            key = g.lower().replace("-", " ").replace("_", " ").strip()
+            out.append(GENRE_TUR_ALIASES.get(key, g))
     return out
 
 # -------------------------------------------------
 # HELPERS
 # -------------------------------------------------
 def format_tmdb_image(path, size="w500"):
-    if not path:
-        return ""
-    return f"https://image.tmdb.org/t/p/{size}{path}"
+    return f"https://image.tmdb.org/t/p/{size}{path}" if path else ""
 
 def get_tmdb_logo(images):
-    if not images:
+    if not images or not getattr(images, "logos", None):
         return ""
-    logos = getattr(images, "logos", None)
-    if not logos:
-        return ""
-    for logo in logos:
-        if getattr(logo, "iso_639_1", None) == "en":
-            return format_tmdb_image(getattr(logo, "file_path", None), "w300")
-    for logo in logos:
-        return format_tmdb_image(getattr(logo, "file_path", None), "w300")
+    for l in images.logos:
+        if l.iso_639_1 == "en" and l.file_path:
+            return format_tmdb_image(l.file_path, "w300")
+    for l in images.logos:
+        if l.file_path:
+            return format_tmdb_image(l.file_path, "w300")
     return ""
 
 def format_imdb_images(imdb_id):
@@ -97,10 +89,10 @@ def format_imdb_images(imdb_id):
 def extract_default_id(text):
     if not text:
         return None
-    imdb = re.search(r'(tt\d+)', str(text))
+    imdb = re.search(r"(tt\d+)", str(text))
     if imdb:
         return imdb.group(1)
-    tmdb = re.search(r'/(movie|tv)/(\d+)', str(text))
+    tmdb = re.search(r"/(movie|tv)/(\d+)", str(text))
     if tmdb:
         return tmdb.group(2)
     return None
@@ -138,15 +130,9 @@ async def safe_tmdb_search(title, type_, year=None):
         TMDB_SEARCH_CACHE[key] = None
         return None
 
-async def _tmdb_movie_details(mid):
-    if mid in TMDB_DETAILS_CACHE:
-        return TMDB_DETAILS_CACHE[mid]
-    async with API_SEMAPHORE:
-        d = await tmdb.movie(mid).details(append_to_response="external_ids,credits")
-        d.images = await tmdb.movie(mid).images()
-    TMDB_DETAILS_CACHE[mid] = d
-    return d
-
+# -------------------------------------------------
+# TMDB FETCHERS
+# -------------------------------------------------
 async def _tmdb_tv_details(tid):
     if tid in TMDB_DETAILS_CACHE:
         return TMDB_DETAILS_CACHE[tid]
@@ -161,12 +147,14 @@ async def _tmdb_episode_details(tid, s, e):
     if key in EPISODE_CACHE:
         return EPISODE_CACHE[key]
     async with API_SEMAPHORE:
-        d = await tmdb.episode(tid, s, e).details()
+        d = await tmdb.episode(tid, s, e).details(
+            append_to_response="images"
+        )
     EPISODE_CACHE[key] = d
     return d
 
 # -------------------------------------------------
-# MAIN ENTRY
+# MAIN
 # -------------------------------------------------
 async def metadata(filename, channel, msg_id):
     try:
@@ -195,15 +183,17 @@ async def metadata(filename, channel, msg_id):
 
     if season:
         return await fetch_tv_metadata(title, season, episode, encoded, year, quality, default_id)
-    return await fetch_movie_metadata(title, encoded, year, quality, default_id)
+
+    return None
 
 # -------------------------------------------------
-# TV
+# TV METADATA (FIXED)
 # -------------------------------------------------
 async def fetch_tv_metadata(title, season, episode, encoded, year, quality, default_id):
     imdb_id = default_id if default_id and str(default_id).startswith("tt") else None
     tmdb_id = int(default_id) if default_id and str(default_id).isdigit() else None
 
+    # --- IMDb FIRST
     if not imdb_id and not tmdb_id:
         imdb_id = await safe_imdb_search(title, "tvSeries")
 
@@ -211,7 +201,12 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
         try:
             imdb = await get_detail(imdb_id, "tvSeries")
             ep = await get_season(imdb_id, season, episode)
+
+            if not ep.get("image"):
+                raise ValueError("IMDb episode image missing")
+
             images = format_imdb_images(imdb_id)
+
             return {
                 "tmdb_id": imdb.get("moviedb_id"),
                 "imdb_id": imdb_id,
@@ -236,8 +231,9 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
                 "encoded_string": encoded,
             }
         except Exception:
-            pass
+            imdb_id = None  # FORCE TMDb
 
+    # --- TMDb FALLBACK
     if not tmdb_id:
         res = await safe_tmdb_search(title, "tv", year)
         if not res:
@@ -246,6 +242,11 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
 
     tv = await _tmdb_tv_details(tmdb_id)
     ep = await _tmdb_episode_details(tmdb_id, season, episode)
+
+    still = (
+        ep.still_path
+        or (ep.images.stills[0].file_path if ep and getattr(ep, "images", None) and ep.images.stills else None)
+    )
 
     return {
         "tmdb_id": tv.id,
@@ -264,69 +265,9 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
         "season_number": season,
         "episode_number": episode,
         "episode_title": ep.name if ep else "",
-        "episode_backdrop": format_tmdb_image(ep.still_path, "original") if ep else "",
+        "episode_backdrop": format_tmdb_image(still, "original") if still else "",
         "episode_overview": ep.overview if ep else "",
         "episode_released": ep.air_date.isoformat() if ep and ep.air_date else "",
-        "quality": quality,
-        "encoded_string": encoded,
-    }
-
-# -------------------------------------------------
-# MOVIE
-# -------------------------------------------------
-async def fetch_movie_metadata(title, encoded, year, quality, default_id):
-    imdb_id = default_id if default_id and str(default_id).startswith("tt") else None
-    tmdb_id = int(default_id) if default_id and str(default_id).isdigit() else None
-
-    if not imdb_id and not tmdb_id:
-        imdb_id = await safe_imdb_search(title, "movie")
-
-    if imdb_id:
-        try:
-            imdb = await get_detail(imdb_id, "movie")
-            images = format_imdb_images(imdb_id)
-            return {
-                "tmdb_id": imdb.get("moviedb_id"),
-                "imdb_id": imdb_id,
-                "title": imdb.get("title"),
-                "year": imdb.get("releaseDetailed", {}).get("year", 0),
-                "rate": imdb.get("rating", {}).get("star", 0),
-                "description": imdb.get("plot", ""),
-                "poster": images["poster"],
-                "backdrop": images["backdrop"],
-                "logo": images["logo"],
-                "genres": tur_genre_normalize(imdb.get("genre", [])),
-                "cast": imdb.get("cast", []),
-                "runtime": str(imdb.get("runtime") or ""),
-                "media_type": "movie",
-                "quality": quality,
-                "encoded_string": encoded,
-            }
-        except Exception:
-            pass
-
-    if not tmdb_id:
-        res = await safe_tmdb_search(title, "movie", year)
-        if not res:
-            return None
-        tmdb_id = res.id
-
-    movie = await _tmdb_movie_details(tmdb_id)
-
-    return {
-        "tmdb_id": movie.id,
-        "imdb_id": movie.external_ids.imdb_id,
-        "title": movie.title,
-        "year": movie.release_date.year if movie.release_date else 0,
-        "rate": movie.vote_average or 0,
-        "description": movie.overview or "",
-        "poster": format_tmdb_image(movie.poster_path),
-        "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
-        "logo": get_tmdb_logo(movie.images),
-        "genres": tur_genre_normalize([g.name for g in movie.genres]),
-        "cast": [c.name for c in movie.credits.cast],
-        "runtime": f"{movie.runtime} min" if movie.runtime else "",
-        "media_type": "movie",
         "quality": quality,
         "encoded_string": encoded,
     }
