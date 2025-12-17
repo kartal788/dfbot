@@ -3,6 +3,7 @@ import PTN
 import re
 from datetime import datetime, timezone
 
+from deep_translator import GoogleTranslator
 from Backend.helper.imdb import get_detail, get_season, search_title
 from themoviedb import aioTMDb
 from Backend.config import Telegram
@@ -19,46 +20,15 @@ IMDB_CACHE = {}
 TMDB_SEARCH_CACHE = {}
 TMDB_DETAILS_CACHE = {}
 EPISODE_CACHE = {}
+TRANSLATE_CACHE = {}
 
 API_SEMAPHORE = asyncio.Semaphore(12)
-
-# -------------------------------------------------
-# DATETIME NORMALIZER
-# -------------------------------------------------
-def to_iso_datetime(date_value):
-    """
-    2022-08-10 -> 2022-08-10T11:00:00.000Z
-    """
-    if not date_value:
-        return ""
-
-    try:
-        if isinstance(date_value, str):
-            dt = datetime.fromisoformat(date_value)
-        else:
-            dt = date_value
-
-        dt = dt.replace(
-            hour=11,
-            minute=0,
-            second=0,
-            microsecond=0,
-            tzinfo=timezone.utc
-        )
-        return dt.isoformat().replace("+00:00", "Z")
-    except Exception:
-        return ""
 
 # -------------------------------------------------
 # GENRE NORMALIZATION
 # -------------------------------------------------
 GENRE_TUR_ALIASES = {
     "action": "Aksiyon",
-    "film noir": "Kara Film",
-    "game show": "Oyun Gösterisi",
-    "short": "Kısa",
-    "sci fi": "Bilim Kurgu",
-    "sport": "Spor",
     "adventure": "Macera",
     "animation": "Animasyon",
     "biography": "Biyografi",
@@ -67,27 +37,18 @@ GENRE_TUR_ALIASES = {
     "documentary": "Belgesel",
     "drama": "Dram",
     "family": "Aile",
-    "news": "Haberler",
     "fantasy": "Fantastik",
     "history": "Tarih",
     "horror": "Korku",
     "music": "Müzik",
-    "musical": "Müzikal",
     "mystery": "Gizem",
     "romance": "Romantik",
     "science fiction": "Bilim Kurgu",
-    "tv movie": "TV Filmi",
     "thriller": "Gerilim",
     "war": "Savaş",
     "western": "Vahşi Batı",
     "action & adventure": "Aksiyon ve Macera",
-    "kids": "Çocuklar",
-    "reality": "Gerçeklik",
-    "reality tv": "Gerçeklik",
-    "sci fi & fantasy": "Bilim Kurgu ve Fantazi",
-    "soap": "Pembe Dizi",
-    "war & politics": "Savaş ve Politika",
-    "talk": "Talk-Show",
+    "sci-fi & fantasy": "Bilim Kurgu ve Fantazi",
 }
 
 def tur_genre_normalize(genres):
@@ -95,9 +56,8 @@ def tur_genre_normalize(genres):
         return []
     out = []
     for g in genres:
-        if g:
-            key = g.lower().replace("-", " ").replace("_", " ").strip()
-            out.append(GENRE_TUR_ALIASES.get(key, g))
+        key = g.lower().replace("-", " ").replace("_", " ").strip()
+        out.append(GENRE_TUR_ALIASES.get(key, g))
     return out
 
 # -------------------------------------------------
@@ -137,6 +97,34 @@ def extract_default_id(text):
         return tmdb.group(2)
     return None
 
+def to_iso_datetime(date_value):
+    if not date_value:
+        return ""
+    try:
+        if isinstance(date_value, str):
+            dt = datetime.fromisoformat(date_value)
+        else:
+            dt = date_value
+        dt = dt.replace(
+            hour=11, minute=0, second=0, microsecond=0,
+            tzinfo=timezone.utc
+        )
+        return dt.isoformat().replace("+00:00", "Z")
+    except Exception:
+        return ""
+
+def translate_text_safe(text):
+    if not text or not str(text).strip():
+        return ""
+    if text in TRANSLATE_CACHE:
+        return TRANSLATE_CACHE[text]
+    try:
+        tr = GoogleTranslator(source="en", target="tr").translate(text)
+    except Exception:
+        tr = text
+    TRANSLATE_CACHE[text] = tr
+    return tr
+
 # -------------------------------------------------
 # SAFE SEARCH
 # -------------------------------------------------
@@ -167,7 +155,6 @@ async def safe_tmdb_search(title, type_, year=None):
         TMDB_SEARCH_CACHE[key] = res[0] if res else None
         return TMDB_SEARCH_CACHE[key]
     except Exception:
-        TMDB_SEARCH_CACHE[key] = None
         return None
 
 # -------------------------------------------------
@@ -226,17 +213,9 @@ async def metadata(filename, channel, msg_id):
     if season and not episode:
         return None
 
-    encoded = None
-    try:
-        encoded = await encode_string(
-            {"chat_id": channel, "msg_id": msg_id}
-        )
-    except Exception:
-        pass
+    encoded = await encode_string({"chat_id": channel, "msg_id": msg_id})
 
-    default_id = extract_default_id(
-        Backend.USE_DEFAULT_ID
-    ) or extract_default_id(filename)
+    default_id = extract_default_id(Backend.USE_DEFAULT_ID) or extract_default_id(filename)
 
     if season:
         return await fetch_tv_metadata(
@@ -267,12 +246,10 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
                 "tmdb_id": imdb.get("moviedb_id"),
                 "imdb_id": imdb_id,
                 "title": imdb.get("title"),
-                "released": to_iso_datetime(
-                    imdb.get("releaseDetailed", {}).get("date")
-                ),
                 "year": imdb.get("releaseDetailed", {}).get("year", 0),
+                "released": to_iso_datetime(imdb.get("releaseDetailed", {}).get("date")),
                 "rate": imdb.get("rating", {}).get("star", 0),
-                "description": imdb.get("plot", ""),
+                "description": translate_text_safe(imdb.get("plot", "")),
                 "poster": images["poster"],
                 "backdrop": images["backdrop"],
                 "logo": images["logo"],
@@ -284,13 +261,13 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
                 "episode_number": episode,
                 "episode_title": ep.get("title", ""),
                 "episode_backdrop": ep.get("image", ""),
-                "episode_overview": ep.get("plot", ""),
+                "episode_overview": translate_text_safe(ep.get("plot", "")),
                 "episode_released": to_iso_datetime(ep.get("released")),
                 "quality": quality,
                 "encoded_string": encoded,
             }
         except Exception:
-            imdb_id = None
+            pass
 
     if not tmdb_id:
         res = await safe_tmdb_search(title, "tv", year)
@@ -301,14 +278,16 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
     tv = await _tmdb_tv_details(tmdb_id)
     ep = await _tmdb_episode_details(tmdb_id, season, episode)
 
+    still = ep.still_path if ep else None
+
     return {
         "tmdb_id": tv.id,
         "imdb_id": getattr(tv.external_ids, "imdb_id", None),
         "title": tv.name,
-        "released": to_iso_datetime(tv.first_air_date),
         "year": tv.first_air_date.year if tv.first_air_date else 0,
+        "released": to_iso_datetime(tv.first_air_date),
         "rate": tv.vote_average or 0,
-        "description": tv.overview or "",
+        "description": translate_text_safe(tv.overview),
         "poster": format_tmdb_image(tv.poster_path),
         "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
         "logo": get_tmdb_logo(tv.images),
@@ -319,8 +298,8 @@ async def fetch_tv_metadata(title, season, episode, encoded, year, quality, defa
         "season_number": season,
         "episode_number": episode,
         "episode_title": ep.name if ep else "",
-        "episode_backdrop": format_tmdb_image(ep.still_path, "original") if ep else "",
-        "episode_overview": ep.overview if ep else "",
+        "episode_backdrop": format_tmdb_image(still, "original") if still else "",
+        "episode_overview": translate_text_safe(ep.overview) if ep else "",
         "episode_released": to_iso_datetime(ep.air_date) if ep else "",
         "quality": quality,
         "encoded_string": encoded,
@@ -345,12 +324,10 @@ async def fetch_movie_metadata(title, encoded, year, quality, default_id):
                 "tmdb_id": imdb.get("moviedb_id"),
                 "imdb_id": imdb_id,
                 "title": imdb.get("title", title),
-                "released": to_iso_datetime(
-                    imdb.get("releaseDetailed", {}).get("date")
-                ),
                 "year": imdb.get("releaseDetailed", {}).get("year", 0),
+                "released": to_iso_datetime(imdb.get("releaseDetailed", {}).get("date")),
                 "rate": imdb.get("rating", {}).get("star", 0),
-                "description": imdb.get("plot", ""),
+                "description": translate_text_safe(imdb.get("plot", "")),
                 "poster": images["poster"],
                 "backdrop": images["backdrop"],
                 "logo": images["logo"],
@@ -362,7 +339,7 @@ async def fetch_movie_metadata(title, encoded, year, quality, default_id):
                 "encoded_string": encoded,
             }
         except Exception:
-            imdb_id = None
+            pass
 
     if not tmdb_id:
         res = await safe_tmdb_search(title, "movie", year)
@@ -376,10 +353,10 @@ async def fetch_movie_metadata(title, encoded, year, quality, default_id):
         "tmdb_id": movie.id,
         "imdb_id": getattr(movie.external_ids, "imdb_id", None),
         "title": movie.title,
-        "released": to_iso_datetime(movie.release_date),
         "year": movie.release_date.year if movie.release_date else 0,
+        "released": to_iso_datetime(movie.release_date),
         "rate": movie.vote_average or 0,
-        "description": movie.overview or "",
+        "description": translate_text_safe(movie.overview),
         "poster": format_tmdb_image(movie.poster_path),
         "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
         "logo": get_tmdb_logo(movie.images),
