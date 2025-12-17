@@ -67,12 +67,24 @@ async def ekle(client: Client, message: Message):
         return await message.reply_text("Kullanım: /ekle pixeldrain_link [pixeldrain_link_2] ...")
 
     status = await message.reply_text("📥 Metadata alınıyor...")
-    current_status = "📥 Metadata alınıyor..."  # Track the current status message
 
+    current_status = "📥 Metadata alınıyor..."  # İlk mesaj
     reply_message = []  # Çıktı mesajlarını depolayacağımız liste
     added_files = []  # Eklenen dosyaların bilgilerini tutacağımız liste
 
-    # Tek tek tüm linkleri işleyebilmek için döngü başlatıyoruz
+    # ----------------- Update mesajı 15 saniyede bir -----------------
+    async def update_status():
+        nonlocal current_status
+        while True:
+            await asyncio.sleep(15)  # 15 saniye bekle
+            # Tarih/saat ekleyerek mesajı güncelleriz
+            current_status = f"📥 Metadata alınıyor... {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
+            await status.edit_text(current_status)
+
+    # Mesajı güncelleyen asenkron fonksiyonu başlat
+    asyncio.create_task(update_status())
+
+    # Linkleri işleme kısmı
     for raw_link in args:
         try:
             api_link = pixeldrain_to_api(raw_link)
@@ -258,6 +270,7 @@ async def ekle(client: Client, message: Message):
 
         # Dosyayı gönderimden sonra siliyoruz
         os.remove(file_path)
+
 
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
