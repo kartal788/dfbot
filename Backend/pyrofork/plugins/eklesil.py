@@ -18,21 +18,21 @@ MONGO_URL = db_urls[1]
 DB_NAME = "dbFyvio"
 
 # ----------------- MongoDB -----------------
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+mongo = AsyncIOMotorClient(MONGO_URL)
+db = mongo[DB_NAME]
 movie_col = db["movie"]
 series_col = db["tv"]
 
 # ----------------- Helpers -----------------
 def pixeldrain_to_api(url: str) -> str:
-    m = re.match(r"https?://pixeldrain\.com/u/([a-zA-Z0-9]+)", url)
+    m = re.match(r"https?://pixeldrain\.com/u/([A-Za-z0-9]+)", url)
     if not m:
         return url
     return f"https://pixeldrain.com/api/file/{m.group(1)}"
 
 async def head(url, key):
     async with aiohttp.ClientSession() as s:
-        async with s.head(url, allow_redirects=True, timeout=15) as r:
+        async with s.head(url, allow_redirects=True, timeout=20) as r:
             return r.headers.get(key)
 
 async def filename_from_url(url):
@@ -59,7 +59,7 @@ async def filesize(url):
 async def ekle(client: Client, message: Message):
     text = message.text.strip()
 
-    # ---- TEK SATIR + ÇOK SATIR DESTEK ----
+    # ---- tek satır + çok satır ----
     if "\n" in text:
         lines = text.split("\n")[1:]
     else:
@@ -76,10 +76,9 @@ async def ekle(client: Client, message: Message):
 
     status = await message.reply_text("📥 Metadata alınıyor...")
 
-    added = []
-    failed = []
     movie_count = 0
     series_count = 0
+    failed = []
 
     for line in lines:
         line = line.strip()
@@ -95,42 +94,20 @@ async def ekle(client: Client, message: Message):
             real_filename = await filename_from_url(api_link)
             size = await filesize(api_link)
 
-            meta = None
+            # ---- metadata.py ile UYUMLU ----
+            if extra_info:
+                fake_filename = f"{extra_info} {real_filename}"
+            else:
+                fake_filename = real_filename
 
-            # 1️⃣ IMDB
-            if extra_info and re.match(r"^tt\d+$", extra_info):
-                meta = await metadata(
-                    imdb_id=extra_info,
-                    channel=message.chat.id,
-                    msg_id=message.id
-                )
-
-            # 2️⃣ TMDB
-            elif extra_info and re.match(r"^\d+$", extra_info):
-                meta = await metadata(
-                    tmdb_id=extra_info,
-                    channel=message.chat.id,
-                    msg_id=message.id
-                )
-
-            # 3️⃣ Filename
-            elif extra_info:
-                meta = await metadata(
-                    filename=extra_info,
-                    channel=message.chat.id,
-                    msg_id=message.id
-                )
-
-            # 4️⃣ Fallback filename
-            if not meta:
-                meta = await metadata(
-                    filename=real_filename,
-                    channel=message.chat.id,
-                    msg_id=message.id
-                )
+            meta = await metadata(
+                filename=fake_filename,
+                channel=message.chat.id,
+                msg_id=message.id
+            )
 
             if not meta:
-                raise ValueError("Metadata bulunamadı")
+                raise Exception("Metadata bulunamadı")
 
             telegram_obj = {
                 "quality": meta["quality"],
@@ -223,8 +200,6 @@ async def ekle(client: Client, message: Message):
                     await series_col.replace_one({"_id": doc["_id"]}, doc)
 
                 series_count += 1
-
-            added.append(real_filename)
 
         except Exception as e:
             LOGGER.exception(e)
