@@ -28,11 +28,12 @@ API_SEMAPHORE = asyncio.Semaphore(12)
 # GENRE NORMALIZATION
 # -------------------------------------------------
 GENRE_TUR_ALIASES = {
+{
   "action": "Aksiyon",
-  "film-Noir": "Kara Film",
-  "game-Show": "Oyun Gösterisi",
+  "film-noir": "Kara Film",
+  "game-show": "Oyun Gösterisi",
   "short": "Kısa",
-  "sci-Fi": "Bilim Kurgu",
+  "sci-fi": "Bilim Kurgu",
   "sport": "Spor",
   "adventure": "Macera",
   "animation": "Animasyon",
@@ -50,25 +51,25 @@ GENRE_TUR_ALIASES = {
   "musical": "Müzikal",
   "mystery": "Gizem",
   "romance": "Romantik",
-  "science Fiction": "Bilim Kurgu",
-  "tV Movie": "TV Filmi",
+  "science fiction": "Bilim Kurgu",
+  "tv movie": "TV Filmi",
   "thriller": "Gerilim",
   "war": "Savaş",
   "western": "Vahşi Batı",
-  "action & Adventure": "Aksiyon ve Macera",
+  "action & adventure": "Aksiyon ve Macera",
   "kids": "Çocuklar",
   "reality": "Gerçeklik",
-  "reality-TV": "Gerçeklik",
-  "sci-Fi & Fantasy": "Bilim Kurgu ve Fantazi",
+  "reality-tv": "Gerçeklik",
+  "sci-fi & fantasy": "Bilim Kurgu ve Fantazi",
   "soap": "Pembe Dizi",
-  "war & Politics": "Savaş ve Politika",
-  "bilim-Kurgu": "Bilim Kurgu",
-  "aksiyon & Macera": "Aksiyon ve Macera",
-  "savaş & Politik": "Savaş ve Politika",
-  "bilim Kurgu & Fantazi": "Bilim Kurgu ve Fantazi",
+  "war & politics": "Savaş ve Politika",
+  "bilim-kurgu": "Bilim Kurgu",
+  "aksiyon & macera": "Aksiyon ve Macera",
+  "savaş & politik": "Savaş ve Politika",
+  "bilim kurgu & fantazi": "Bilim Kurgu ve Fantazi",
   "talk": "Talk-Show",
 }
-
+  
 def tur_genre_normalize(genres):
     if not genres:
         return []
