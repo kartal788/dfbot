@@ -160,7 +160,6 @@ async def ekle(client: Client, message: Message):
             filename = await filename_from_url(raw)
             parsed = PTN.parse(filename)
 
-            # Custom name'i ya da PTN'den alınan bilgileri kullanıyoruz
             if custom_name:
                 clean = PTN.parse(custom_name)
                 title = clean.get("title")
@@ -175,7 +174,6 @@ async def ekle(client: Client, message: Message):
             size = await filesize(raw)
             display_name = custom_name or filename
 
-            # TMDb araması yapıyoruz
             async with API_SEMAPHORE:
                 if season and episode:
                     results = await tmdb.search().tv(query=title)
@@ -187,44 +185,22 @@ async def ekle(client: Client, message: Message):
                     col = movie_col
 
             if not results:
-                raise Exception("TMDB bulunamadı")
+                raise Exception("TMDB'den veri alınamadı!")
 
             meta = results[0]
-
-            # IMDb ID'sini alıyoruz
-            imdb_id = meta.imdb_id if hasattr(meta, 'imdb_id') else None
-
-            # IMDb verilerini çekiyoruz
-            imdb_data = await fetch_imdb_details(imdb_id) if imdb_id else None
-
-            # TMDb'den alınan detayları alıyoruz
             details = await (tmdb.tv(meta.id).details() if media_type == "tv" else tmdb.movie(meta.id).details())
 
-            # Film ya da dizi verisini oluşturuyoruz
             doc = await col.find_one({"tmdb_id": meta.id})
 
             if not doc:
-                # IMDb verilerini ekliyoruz
-                if imdb_data:
-                    imdb_poster = format_imdb_images(imdb_id)["poster"] if imdb_data else ""
-                    imdb_backdrop = format_imdb_images(imdb_id)["backdrop"] if imdb_data else ""
-
-                # Media record'u oluşturuyoruz
                 doc = build_media_record(meta, details, display_name, raw, quality, media_type, season, episode)
-
                 if media_type == "movie":
                     doc["telegram"][0]["size"] = size
-                    doc["imdb_poster"] = imdb_poster
-                    doc["imdb_backdrop"] = imdb_backdrop
                 else:
                     doc["seasons"][0]["episodes"][0]["telegram"][0]["size"] = size
-                    doc["seasons"][0]["episodes"][0]["imdb_poster"] = imdb_poster
-                    doc["seasons"][0]["episodes"][0]["imdb_backdrop"] = imdb_backdrop
-                
                 await col.insert_one(doc)
 
             else:
-                # Eğer zaten var ise, sadece güncelleme yapıyoruz
                 if media_type == "movie":
                     t = next((x for x in doc["telegram"] if x["name"] == display_name), None)
                     if t:
@@ -237,10 +213,6 @@ async def ekle(client: Client, message: Message):
                             "name": display_name,
                             "size": size
                         })
-
-                    # IMDb poster ve backdrop ekliyoruz
-                    doc["imdb_poster"] = imdb_poster
-                    doc["imdb_backdrop"] = imdb_backdrop
 
                 else:
                     s = next((x for x in doc["seasons"] if x["season_number"] == season), None)
@@ -265,17 +237,26 @@ async def ekle(client: Client, message: Message):
                             "size": size
                         })
 
-                    # IMDb poster ve backdrop ekliyoruz
-                    e["imdb_poster"] = imdb_poster
-                    e["imdb_backdrop"] = imdb_backdrop
-
                 doc["updated_on"] = str(datetime.utcnow())
                 await col.replace_one({"_id": doc["_id"]}, doc)
 
             success.append(display_name)
 
-        except Exception:
+        except Exception as e:
             failed.append(display_name)
+            # Hata türüne göre açıklamalı mesaj gönderiyoruz
+            error_message = str(e)
+
+            if "TMDB" in error_message:
+                explanation = "TMDB API'den veri alınamadı. Film/Dizi verileri alınamadı."
+            elif "Pixeldrain" in error_message:
+                explanation = "Pixeldrain linki doğru formatta değil veya geçersiz. Lütfen doğru linki girin."
+            elif "PTN" in error_message:
+                explanation = "Dosya adı parse edilemedi. Dosya adı beklenen formatta olmayabilir."
+            else:
+                explanation = "Bilinmeyen bir hata oluştu."
+
+            await message.reply_text(f"❌ **Hata:** {explanation}\n\n**Detay:** {error_message}")
 
         await msg.edit_text(f"🔄 {i}/{len(inputs)}\n✅ {len(success)} | ❌ {len(failed)}")
 
@@ -285,6 +266,7 @@ async def ekle(client: Client, message: Message):
         f"✅ Başarılı: {len(success)}\n"
         f"❌ Başarısız: {len(failed)}"
     )
+
 
 # ----------------- /SİL -----------------
 @Client.on_message(filters.command("sil") & filters.private & CustomFilters.owner)
