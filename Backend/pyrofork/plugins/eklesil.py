@@ -68,7 +68,7 @@ async def filesize(url):
 async def ekle(client: Client, message: Message):
     text = message.text.strip()
 
-    # ---- tek satır + çok satır ----
+    # Tek satır + çok satır desteği
     if "\n" in text:
         lines = text.split("\n")[1:]
     else:
@@ -77,14 +77,10 @@ async def ekle(client: Client, message: Message):
 
     if not lines:
         return await message.reply_text(
-            "Kullanım:\n"
-            "/ekle link [imdb|tmdb|filename]\n"
-            "veya\n"
-            "/ekle\\nlink"
+            "Kullanım:\n/ekle link [imdb|tmdb|filename]\nveya\n/ekle\\nlink"
         )
 
     status = await message.reply_text("📥 Metadata alınıyor...")
-
     movie_count = 0
     series_count = 0
     failed = []
@@ -99,18 +95,23 @@ async def ekle(client: Client, message: Message):
         extra_info = parts[1] if len(parts) > 1 else None
 
         try:
-            api_link = pixeldrain_to_api(link)
-            real_filename = await filename_from_url(api_link)
-            size = await filesize(api_link)
+            # Pixeldrain linki varsa API linkine çevir
+            api_link = pixeldrain_to_api(link) if "pixeldrain.com" in link else link
 
-            # Dosya erişilemezse filename üzerinden metadata
-            if size == "YOK":
-                fake_filename = link.split("/")[-1]
+            # Dosya boyutu al, erişilemezse "YOK"
+            try:
+                size = await filesize(api_link)
+            except:
+                size = "YOK"
+
+            # Metadata filename: extra_info varsa onu kullan, yoksa linkten sonraki kısım
+            if extra_info:
+                meta_filename = extra_info
             else:
-                fake_filename = f"{extra_info} {real_filename}" if extra_info else real_filename
+                meta_filename = " ".join(line.split()[1:]) if len(line.split()) > 1 else link.split("/")[-1]
 
             meta = await metadata(
-                filename=fake_filename,
+                filename=meta_filename,
                 channel=message.chat.id,
                 msg_id=message.id
             )
@@ -121,14 +122,13 @@ async def ekle(client: Client, message: Message):
             telegram_obj = {
                 "quality": meta["quality"],
                 "id": api_link,
-                "name": real_filename,
+                "name": meta_filename,
                 "size": size
             }
 
             # ----------------- MOVIE -----------------
             if meta["media_type"] == "movie":
                 doc = await movie_col.find_one({"tmdb_id": meta["tmdb_id"]})
-
                 if not doc:
                     doc = {
                         "tmdb_id": meta["tmdb_id"],
@@ -153,13 +153,11 @@ async def ekle(client: Client, message: Message):
                     doc["telegram"].append(telegram_obj)
                     doc["updated_on"] = str(datetime.utcnow())
                     await movie_col.replace_one({"_id": doc["_id"]}, doc)
-
                 movie_count += 1
 
             # ----------------- TV -----------------
             else:
                 doc = await series_col.find_one({"tmdb_id": meta["tmdb_id"]})
-
                 episode_obj = {
                     "episode_number": meta["episode_number"],
                     "title": meta["episode_title"],
@@ -168,7 +166,6 @@ async def ekle(client: Client, message: Message):
                     "released": meta["episode_released"],
                     "telegram": [telegram_obj]
                 }
-
                 if not doc:
                     doc = {
                         "tmdb_id": meta["tmdb_id"],
@@ -193,21 +190,13 @@ async def ekle(client: Client, message: Message):
                     }
                     await series_col.insert_one(doc)
                 else:
-                    season = next(
-                        (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
-                        None
-                    )
+                    season = next((s for s in doc["seasons"] if s["season_number"] == meta["season_number"]), None)
                     if not season:
-                        season = {
-                            "season_number": meta["season_number"],
-                            "episodes": []
-                        }
+                        season = {"season_number": meta["season_number"], "episodes": []}
                         doc["seasons"].append(season)
-
                     season["episodes"].append(episode_obj)
                     doc["updated_on"] = str(datetime.utcnow())
                     await series_col.replace_one({"_id": doc["_id"]}, doc)
-
                 series_count += 1
 
         except Exception as e:
@@ -215,10 +204,7 @@ async def ekle(client: Client, message: Message):
             failed.append(line)
 
     await status.edit_text(
-        "✅ İşlem tamamlandı\n\n"
-        f"🎬 Film: {movie_count}\n"
-        f"📺 Dizi: {series_count}\n"
-        f"❌ Hatalı: {len(failed)}"
+        f"✅ İşlem tamamlandı\n\n🎬 Film: {movie_count}\n📺 Dizi: {series_count}\n❌ Hatalı: {len(failed)}"
     )
 
 # ----------------- /SİL -----------------
