@@ -508,7 +508,7 @@ async def istatistik(client: Client, message: Message):
 async def _cb(client: Client, query: CallbackQuery):
     if query.data=="stop":
         await handle_stop(query)
-# ------------------- benzerleri sil -----------------
+# ---------- benzerleri sil ----------
 @Client.on_message(filters.command("benzerlerisil") & filters.private & filters.user(OWNER_ID))
 async def benzerleri_sil(client: Client, message: Message):
     status = await message.reply_text("🔍 Yinelenen telegram kayıtları taranıyor...")
@@ -655,8 +655,10 @@ async def benzerleri_sil(client: Client, message: Message):
         f"📄 Etkilenen kayıt: {total_docs}\n"
         f"🗑️ Silinen tekrar: {total_removed}"
     )
-# ---------- linkleri sil ---------
-    @Client.on_message(filters.command("linklerisil") & filters.private & filters.user(OWNER_ID))
+
+
+# ---------- linkleri sil ----------
+@Client.on_message(filters.command("linklerisil") & filters.private & filters.user(OWNER_ID))
 async def linklerisil(client: Client, message: Message):
     status = await message.reply_text("🔄 Link kayıtları temizleniyor...")
     total_removed = 0
@@ -708,4 +710,3 @@ async def linklerisil(client: Client, message: Message):
             total_docs += 1
 
     await status.edit_text(f"✅ İşlem tamamlandı\n\n📄 Etkilenen kayıt: {total_docs}\n🗑️ Silinen tekrar: {total_removed}")
-
