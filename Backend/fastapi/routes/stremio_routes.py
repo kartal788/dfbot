@@ -178,7 +178,14 @@ async def manifest():
                 "name": "2025 Filmleri",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
-            }
+            },
+ {
+    "type": "movie",
+    "id": "movies_2024",
+    "name": "2024 Filmleri",
+    "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
+    "extraSupported": ["genre", "skip"]
+}
         ],
     }
 
@@ -200,16 +207,21 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     page = (stremio_skip // PAGE_SIZE) + 1
 
     if media_type == "movie":
-        if id == "movies_2025":
-            sort = [("updated_on", "desc")]
-            all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
-            items = [m for m in all_movies.get("movies", []) if m.get("release_year") == 2025]
-        elif "top" in id:
-            sort = [("rating", "desc")]
-            items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
-        else:
-            sort = [("updated_on", "desc")]
-            items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
+    if id == "movies_2025":
+        sort = [("updated_on", "desc")]
+        all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
+        items = [m for m in all_movies.get("movies", []) if m.get("release_year") == 2025]
+    elif id == "movies_2024":
+        sort = [("updated_on", "desc")]
+        all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
+        items = [m for m in all_movies.get("movies", []) if m.get("release_year") == 2024]
+    elif "top" in id:
+        sort = [("rating", "desc")]
+        items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
+    else:
+        sort = [("updated_on", "desc")]
+        items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
+
 
     else:  # series
         if "top" in id:
