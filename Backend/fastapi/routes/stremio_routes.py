@@ -220,15 +220,17 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             sort = [("updated_on", "desc")]
             items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
 
-    elif media_type == "series":
-        if "top" in id:
+        elif media_type == "series":
+            if "top" in id:
             sort = [("rating", "desc")]
-            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-            items = data.get("tv_shows", [])
         else:
             sort = [("updated_on", "desc")]
-            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-            items = data.get("tv_shows", [])
+    
+    data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
+    items = data.get("tv_shows", [])
+
+return {"metas": [convert_to_stremio_meta(i) for i in items]}
+
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
 
