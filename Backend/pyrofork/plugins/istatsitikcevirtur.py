@@ -655,3 +655,57 @@ async def benzerleri_sil(client: Client, message: Message):
         f"📄 Etkilenen kayıt: {total_docs}\n"
         f"🗑️ Silinen tekrar: {total_removed}"
     )
+# ---------- linkleri sil ---------
+    @Client.on_message(filters.command("linklerisil") & filters.private & filters.user(OWNER_ID))
+async def linklerisil(client: Client, message: Message):
+    status = await message.reply_text("🔄 Link kayıtları temizleniyor...")
+    total_removed = 0
+    total_docs = 0
+
+    def is_valid_id(tid):
+        return not (str(tid).startswith("http://") or str(tid).startswith("https://"))
+
+    # ---------- FILMLER ----------
+    for doc in movie_col.find({}, {"_id": 1, "telegram": 1, "title": 1, "tmdb_id":1}):
+        telegram = doc.get("telegram", [])
+        new_telegram = [t for t in telegram if is_valid_id(t.get("id", ""))]
+        removed_count = len(telegram) - len(new_telegram)
+        if removed_count > 0:
+            total_removed += removed_count
+            if new_telegram:
+                movie_col.update_one({"_id": doc["_id"]}, {"$set": {"telegram": new_telegram}})
+            else:
+                movie_col.delete_one({"_id": doc["_id"]})
+            total_docs += 1
+
+    # ---------- DİZİLER ----------
+    for doc in series_col.find({}, {"_id": 1, "seasons": 1, "title":1, "imdb_id":1}):
+        seasons = doc.get("seasons", [])
+        doc_updated = False
+        for season in seasons:
+            episodes = season.get("episodes", [])
+            new_episodes = []
+            for ep in episodes:
+                telegram = ep.get("telegram", [])
+                new_telegram = [t for t in telegram if is_valid_id(t.get("id", ""))]
+                removed_count = len(telegram) - len(new_telegram)
+                if removed_count > 0:
+                    total_removed += removed_count
+                if new_telegram:
+                    ep["telegram"] = new_telegram
+                    new_episodes.append(ep)
+                else:
+                    doc_updated = True  # bölüm silindi
+            season["episodes"] = new_episodes
+        # Sezonlar güncellendikten sonra hiçbir bölüm kalmamışsa dizi silinecek
+        remaining_eps = sum(len(s.get("episodes", [])) for s in seasons)
+        if remaining_eps > 0:
+            series_col.update_one({"_id": doc["_id"]}, {"$set": {"seasons": seasons}})
+            if doc_updated:
+                total_docs += 1
+        else:
+            series_col.delete_one({"_id": doc["_id"]})
+            total_docs += 1
+
+    await status.edit_text(f"✅ İşlem tamamlandı\n\n📄 Etkilenen kayıt: {total_docs}\n🗑️ Silinen tekrar: {total_removed}")
+
