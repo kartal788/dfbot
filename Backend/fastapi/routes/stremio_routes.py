@@ -189,7 +189,6 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     stremio_skip = 0
     genre = None
 
-    # Extra parametreleri ayıkla
     if extra:
         for p in extra.replace("&", "/").split("/"):
             if p.startswith("genre="):
@@ -198,7 +197,6 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
                 stremio_skip = int(p[5:] or 0)
 
     page = (stremio_skip // PAGE_SIZE) + 1
-
     items = []
 
     if media_type == "movie":
@@ -224,27 +222,11 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             sort = [("rating", "desc")]
         else:
             sort = [("updated_on", "desc")]
-
         data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
         items = data.get("tv_shows", [])
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
 
-
-
-    return {"metas": [convert_to_stremio_meta(i) for i in items]}
-
-    else:  # series
-        if "top" in id:
-            sort = [("rating", "desc")]
-            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-            items = data.get("tv_shows", [])
-        else:
-            sort = [("updated_on", "desc")]
-            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-            items = data.get("tv_shows", [])
-
-    return {"metas": [convert_to_stremio_meta(i) for i in items]}
 
 
 # --- Meta ---
