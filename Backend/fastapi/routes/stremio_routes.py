@@ -206,7 +206,7 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
 
     page = (stremio_skip // PAGE_SIZE) + 1
 
-    if media_type == "movie":
+ if media_type == "movie":
     if id == "movies_2025":
         sort = [("updated_on", "desc")]
         all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
@@ -221,7 +221,6 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
     else:
         sort = [("updated_on", "desc")]
         items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
-
 
     else:  # series
         if "top" in id:
