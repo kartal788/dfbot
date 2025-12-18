@@ -129,7 +129,7 @@ async def get_manifest():
         "version": ADDON_VERSION,
         "name": ADDON_NAME,
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
-        "description": "Streams movies and series from your Telegram.",
+        "description": "Dizi ve film arşivim.",
         "types": ["movie", "series"],
         "resources": ["catalog", "meta", "stream"],
         "catalogs": [
