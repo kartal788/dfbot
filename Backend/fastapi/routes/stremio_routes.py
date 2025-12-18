@@ -192,19 +192,42 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
 
     page = (stremio_skip // PAGE_SIZE) + 1
 
-    if "top" in id:
-        sort = [("rating", "desc")]
-    else:
-        sort = [("updated_on", "desc")]
-
     if media_type == "movie":
+        if "top" in id:
+            sort = [("rating", "desc")]
+        else:
+            sort = [("updated_on", "desc")]
+
         data = await db.sort_movies(sort, page, PAGE_SIZE, genre)
         items = data.get("movies", [])
-    else:
+
+    else:  # series
+        if "top" in id:
+            sort = [("rating", "desc")]
+        else:
+            sort = [("updated_on", "desc")]
+
         data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
         items = data.get("tv_shows", [])
 
+        # --- Dizi released sıralaması ---
+        if "released" in id:
+            def get_series_latest_release(series):
+                latest_date = None
+                for season in series.get("seasons", []):
+                    for ep in season.get("episodes", []):
+                        try:
+                            ep_date = datetime.fromisoformat(ep["released"].replace("Z", "+00:00"))
+                            if not latest_date or ep_date > latest_date:
+                                latest_date = ep_date
+                        except Exception:
+                            continue
+                return latest_date or datetime.min
+
+            items.sort(key=get_series_latest_release, reverse=True)
+
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
+
 
 
 # --- Meta ---
