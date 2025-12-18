@@ -487,7 +487,7 @@ async def istatistik(client: Client, message: Message):
 
     # Kalite sıralama fonksiyonu
     def format_quality_stats(q_dict):
-        order = ["2160p", "1080p", "720p", "576p", "480p"]
+        order = ["2160p", "1920p", "1440p", "1080p", "720p", "576p", "480p"]
         sorted_items = sorted(
             q_dict.items(),
             key=lambda x: (order.index(x[0]) if x[0] in order else len(order), x[0])
@@ -506,7 +506,7 @@ async def istatistik(client: Client, message: Message):
     uptime_seconds = time.time() - psutil.boot_time()
     h, rem = divmod(int(uptime_seconds), 3600)
     m, s = divmod(rem, 60)
-    uptime_str = f"{h}h{m}m{s}s"
+    uptime_str = f"{h}s{m}d{s}s"
 
     stats = db.command("dbstats")
     storage_mb = round(stats.get("storageSize",0)/(1024*1024),2)
