@@ -140,7 +140,7 @@ async def manifest():
              {
                 "type": "series",
                 "id": "released",
-                "name": "Recently Released",
+                "name": "Yeni Bölüm",
                 "extra": [{"name": "skip"}],  # İstersen genre da ekleyebilirsin
                 "extraSupported": ["skip"]
             },
