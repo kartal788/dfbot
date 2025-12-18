@@ -398,6 +398,22 @@ async def tur_ve_platform_duzelt(client: Client, message: Message):
     await start_msg.edit_text(f"✅ Tür ve platform güncellemesi tamamlandı.\nToplam değiştirilen kayıt: {total_fixed}")
 
 # ---------------- /ISTATISTIK ----------------
+def get_system_status():
+    cpu = psutil.cpu_percent(interval=1)
+    ram = psutil.virtual_memory().percent
+    disk = psutil.disk_usage("/")
+
+    free_disk_gb = round(disk.free / (1024**3), 2)
+    free_percent = disk.percent
+    uptime_seconds = time.time() - psutil.boot_time()
+    
+    # Süreyi h:m:s formatına çevir
+    h, rem = divmod(int(uptime_seconds), 3600)
+    m, s = divmod(rem, 60)
+    uptime_str = f"{h}h{m}m{s}s"
+
+    return cpu, ram, free_disk_gb, free_percent, uptime_str
+
 def count_movie_links_qualities():
     link_set = set()
     telegram_set = set()
