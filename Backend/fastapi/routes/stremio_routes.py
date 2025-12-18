@@ -137,6 +137,13 @@ async def manifest():
         "resources": ["catalog", "meta", "stream"],
         "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
         "catalogs": [
+             {
+                "type": "series",
+                "id": "released",
+                "name": "Recently Released",
+                "extra": [{"name": "skip"}],  # İstersen genre da ekleyebilirsin
+                "extraSupported": ["skip"]
+            },
             {
                 "type": "movie",
                 "id": "latest_movies",
