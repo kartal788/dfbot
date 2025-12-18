@@ -5,6 +5,7 @@ from Backend.config import Telegram
 from Backend import db, __version__
 import PTN
 from datetime import datetime, timezone, timedelta
+from dateutil.parser import parse as parse_date
 
 
 # --- Configuration ---
@@ -14,7 +15,6 @@ ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
 router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
-
 
 # --- Genres ---
 GENRES = [
@@ -28,12 +28,12 @@ GENRES = [
 ]
 
 
-# --- Helpers ---
+# --- Helper Functions ---
 def convert_to_stremio_meta(item: dict) -> dict:
     media_type = "series" if item.get("media_type") == "tv" else "movie"
     stremio_id = f"{item.get('tmdb_id')}-{item.get('db_index')}"
 
-    return {
+    meta = {
         "id": stremio_id,
         "type": media_type,
         "name": item.get("title"),
@@ -50,6 +50,7 @@ def convert_to_stremio_meta(item: dict) -> dict:
         "cast": item.get("cast") or [],
         "runtime": item.get("runtime") or "",
     }
+    return meta
 
 
 def format_stream_details(filename: str, quality: str, size: str, file_id: str) -> tuple[str, str]:
@@ -77,10 +78,8 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str) 
         codec_parts.append(f"👤 {parsed['encoder']}")
 
     codec_info = " ".join(codec_parts)
-
     resolution = parsed.get("resolution", quality)
     quality_type = parsed.get("quality", "")
-
     stream_name = f"{source_prefix} {resolution} {quality_type}".strip()
 
     stream_title = "\n".join(
@@ -94,8 +93,8 @@ def format_stream_details(filename: str, quality: str, size: str, file_id: str) 
     return stream_name, stream_title
 
 
-def get_resolution_priority(stream_name: str) -> int:
-    resolution_map = {
+def get_resolution_priority(name: str) -> int:
+    mapping = {
         "2160p": 2160, "4k": 2160, "uhd": 2160,
         "1080p": 1080, "fhd": 1080,
         "720p": 720, "hd": 720,
@@ -111,7 +110,6 @@ def get_resolution_priority(stream_name: str) -> int:
 def parse_size(size_str: str) -> float:
     if not size_str:
         return 0.0
-
     size_str = size_str.lower().replace(" ", "")
     try:
         if "gb" in size_str:
@@ -120,12 +118,10 @@ def parse_size(size_str: str) -> float:
             return float(size_str.replace("mb", ""))
     except ValueError:
         pass
-
     return 0.0
 
 
 # --- Manifest ---
-# --- Routes ---
 @router.get("/manifest.json")
 async def get_manifest():
     return {
@@ -234,7 +230,7 @@ async def get_catalog(media_type: str, id: str, extra: Optional[str] = None):
             else:
                 data = await db.sort_tv_shows(sort_params, page, PAGE_SIZE, genre_filter=genre_filter)
                 items = data.get("tv_shows", [])
-    except Exception as e:
+    except Exception:
         return {"metas": []}
 
     metas = [convert_to_stremio_meta(item) for item in items]
@@ -254,37 +250,14 @@ async def get_meta(media_type: str, id: str):
     if not media:
         return {"meta": {}}
 
-    meta_obj = {
-        "id": id,
-        "type": "series" if media.get("media_type") == "tv" else "movie",
-        "name": media.get("title", ""),
-        "description": media.get("description", ""),
-        "year": str(media.get("release_year", "")),
-        "imdbRating": str(media.get("rating", "")),
-        "genres": media.get("genres", []),
-        "poster": media.get("poster", ""),
-        "logo": media.get("logo", ""),
-        "background": media.get("backdrop", ""),
-        "imdb_id": media.get("imdb_id", ""),
-        "releaseInfo": media.get("release_year"),
-        "moviedb_id": media.get("tmdb_id", ""),
-        "cast": media.get("cast") or [],
-        "runtime": media.get("runtime") or "",
+    meta_obj = convert_to_stremio_meta(media)
 
-    }
-
-    # --- Add Episodes ---
     if media_type == "series" and "seasons" in media:
-
         yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-
         videos = []
-
         for season in sorted(media.get("seasons", []), key=lambda s: s.get("season_number")):
             for episode in sorted(season.get("episodes", []), key=lambda e: e.get("episode_number")):
-
                 episode_id = f"{id}:{season['season_number']}:{episode['episode_number']}"
-
                 videos.append({
                     "id": episode_id,
                     "title": episode.get("title", f"Episode {episode['episode_number']}"),
@@ -295,34 +268,40 @@ async def get_meta(media_type: str, id: str):
                     "thumbnail": episode.get("episode_backdrop") or "https://raw.githubusercontent.com/weebzone/Colab-Tools/refs/heads/main/no_episode_backdrop.png",
                     "imdb_id": episode.get("imdb_id") or media.get("imdb_id"),
                 })
-
         meta_obj["videos"] = videos
+
     return {"meta": meta_obj}
 
 
-# --- Streams ---
+# --- Stream ---
 @router.get("/stream/{media_type}/{id}.json")
-async def streams(media_type: str, id: str):
-    parts = id.split(":")
-    tmdb_id, db_index = map(int, parts[0].split("-"))
+async def get_streams(media_type: str, id: str):
+    try:
+        parts = id.split(":")
+        tmdb_id, db_index = map(int, parts[0].split("-"))
+        season_num = int(parts[1]) if len(parts) > 1 else None
+        episode_num = int(parts[2]) if len(parts) > 2 else None
+    except (ValueError, IndexError):
+        raise HTTPException(status_code=400, detail="Invalid Stremio ID format")
 
-    season = int(parts[1]) if len(parts) > 1 else None
-    episode = int(parts[2]) if len(parts) > 2 else None
+    media_details = await db.get_media_details(
+        tmdb_id=tmdb_id,
+        db_index=db_index,
+        season_number=season_num,
+        episode_number=episode_num
+    )
 
-    media = await db.get_media_details(tmdb_id, db_index, season, episode)
-    if not media or "telegram" not in media:
+    if not media_details or "telegram" not in media_details:
         return {"streams": []}
 
     streams = []
+    for quality in media_details.get("telegram", []):
+        file_id = quality.get("id")
+        filename = quality.get("name", "")
+        quality_str = quality.get("quality", "HD")
+        size = quality.get("size", "")
 
-    for q in media["telegram"]:
-        file_id = q["id"]
-        filename = q.get("name", "")
-        quality = q.get("quality", "HD")
-        size = q.get("size", "")
-
-        name, title = format_stream_details(filename, quality, size, file_id)
-
+        stream_name, stream_title = format_stream_details(filename, quality_str, size, file_id)
         url = (
             file_id
             if file_id.startswith(("http://", "https://"))
@@ -330,20 +309,13 @@ async def streams(media_type: str, id: str):
         )
 
         streams.append({
-            "name": name,
-            "title": title,
+            "name": stream_name,
+            "title": stream_title,
             "url": url,
             "_size": parse_size(size)
         })
 
-    streams.sort(
-        key=lambda s: (
-            get_resolution_priority(s["name"]),
-            s["_size"]
-        ),
-        reverse=True
-    )
-
+    streams.sort(key=lambda s: (get_resolution_priority(s["name"]), s["_size"]), reverse=True)
     for s in streams:
         s.pop("_size", None)
 
