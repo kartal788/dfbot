@@ -441,50 +441,35 @@ async def platform_sil(client: Client, message: Message):
     await start_msg.edit_text(f"✅ Platform kayıtları silindi.\nToplam değiştirilen kayıt: {total_fixed}")
 
 # ---------------- /ISTATISTIK ----------------
-def get_system_status():
-    cpu = psutil.cpu_percent(interval=1)
-    ram = psutil.virtual_memory().percent
-    disk = psutil.disk_usage("/")
+@Client.on_message(filters.command("istatistik") & filters.private & filters.user(OWNER_ID))
+async def istatistik(client: Client, message: Message):
+    total_movies = movie_col.count_documents({})
+    total_series = series_col.count_documents({})
 
-    free_disk_gb = round(disk.free / (1024**3), 2)
-    free_percent = disk.percent
-    uptime_seconds = time.time() - psutil.boot_time()
-    
-    # Süreyi h:m:s formatına çevir
-    h, rem = divmod(int(uptime_seconds), 3600)
-    m, s = divmod(rem, 60)
-    uptime_str = f"{h}h{m}m{s}s"
+    # Link ve kalite bazlı istatistikler
+    def count_links_qualities(collection, is_series=False):
+        link_set = set()
+        telegram_set = set()
+        quality_count = defaultdict(lambda: {"Link": 0, "Telegram": 0})
 
-    return cpu, ram, free_disk_gb, free_percent, uptime_str
-
-def count_movie_links_qualities():
-    link_set = set()
-    telegram_set = set()
-    quality_count = defaultdict(lambda: {"Link": 0, "Telegram": 0})
-
-    for doc in movie_col.find({}, {"telegram": 1}):
-        for t in doc.get("telegram", []):
-            _id = t.get("id", "")
-            q = t.get("quality", "Unknown")
-            if _id.startswith("http://") or _id.startswith("https://"):
-                if _id not in link_set:
-                    link_set.add(_id)
-                    quality_count[q]["Link"] += 1
-            else:
-                if _id not in telegram_set:
-                    telegram_set.add(_id)
-                    quality_count[q]["Telegram"] += 1
-    return len(link_set), len(telegram_set), dict(quality_count)
-
-def count_series_links_qualities():
-    link_set = set()
-    telegram_set = set()
-    quality_count = defaultdict(lambda: {"Link": 0, "Telegram": 0})
-
-    for doc in series_col.find({}, {"seasons.episodes.telegram": 1}):
-        for season in doc.get("seasons", []):
-            for ep in season.get("episodes", []):
-                for t in ep.get("telegram", []):
+        if is_series:
+            for doc in collection.find({}, {"seasons.episodes.telegram": 1}):
+                for season in doc.get("seasons", []):
+                    for ep in season.get("episodes", []):
+                        for t in ep.get("telegram", []):
+                            _id = t.get("id", "")
+                            q = t.get("quality", "Unknown")
+                            if _id.startswith("http://") or _id.startswith("https://"):
+                                if _id not in link_set:
+                                    link_set.add(_id)
+                                    quality_count[q]["Link"] += 1
+                            else:
+                                if _id not in telegram_set:
+                                    telegram_set.add(_id)
+                                    quality_count[q]["Telegram"] += 1
+        else:
+            for doc in collection.find({}, {"telegram": 1}):
+                for t in doc.get("telegram", []):
                     _id = t.get("id", "")
                     q = t.get("quality", "Unknown")
                     if _id.startswith("http://") or _id.startswith("https://"):
@@ -495,28 +480,37 @@ def count_series_links_qualities():
                         if _id not in telegram_set:
                             telegram_set.add(_id)
                             quality_count[q]["Telegram"] += 1
-    return len(link_set), len(telegram_set), dict(quality_count)
+        return len(link_set), len(telegram_set), dict(quality_count)
 
-def format_quality_stats(q_dict):
-    return "\n".join(
-        f"   ┠ {q} → Link: {c['Link']} | Telegram: {c['Telegram']}"
-        for q, c in sorted(q_dict.items())
-    )
+    movie_link, movie_tg, movie_quality_counts = count_links_qualities(movie_col)
+    series_link, series_tg, series_quality_counts = count_links_qualities(series_col, is_series=True)
 
-@Client.on_message(filters.command("istatistik") & filters.private & filters.user(OWNER_ID))
-async def istatistik(client: Client, message: Message):
-    total_movies = movie_col.count_documents({})
-    total_series = series_col.count_documents({})
-
-    # Link ve kalite bazlı istatistikler
-    movie_link, movie_tg, movie_quality_counts = count_movie_links_qualities()
-    series_link, series_tg, series_quality_counts = count_series_links_qualities()
+    # Kalite sıralama fonksiyonu
+    def format_quality_stats(q_dict):
+        order = ["2160p", "1080p", "720p", "576p", "480p"]
+        sorted_items = sorted(
+            q_dict.items(),
+            key=lambda x: (order.index(x[0]) if x[0] in order else len(order), x[0])
+        )
+        return "\n".join(
+            f"   ┠ {q} → Link: {c['Link']} | Telegram: {c['Telegram']}"
+            for q, c in sorted_items
+        )
 
     # Depolama ve sistem durumu
+    cpu = psutil.cpu_percent(interval=1)
+    ram = psutil.virtual_memory().percent
+    disk = psutil.disk_usage("/")
+    free_disk_gb = round(disk.free / (1024**3), 2)
+    free_percent = disk.percent
+    uptime_seconds = time.time() - psutil.boot_time()
+    h, rem = divmod(int(uptime_seconds), 3600)
+    m, s = divmod(rem, 60)
+    uptime_str = f"{h}h{m}m{s}s"
+
     stats = db.command("dbstats")
     storage_mb = round(stats.get("storageSize",0)/(1024*1024),2)
     storage_percent = round((storage_mb/512)*100,1)
-    cpu, ram, free_disk, free_percent, uptime = get_system_status()
 
     # Tür dağılımı
     genre_stats = defaultdict(lambda: {"film":0, "dizi":0})
@@ -540,11 +534,12 @@ async def istatistik(client: Client, message: Message):
         f"{format_quality_stats(series_quality_counts)}\n\n"
         f"┖ Depolama: {storage_mb} MB (%{storage_percent})\n\n"
         f"<b>Tür Dağılımı</b>\n<pre>{genre_text}</pre>\n\n"
-        f"┟ CPU → {cpu}% | Boş → {free_disk}GB [{free_percent}%]\n"
-        f"┖ RAM → {ram}% | Süre → {uptime}"
+        f"┟ CPU → {cpu}% | Boş → {free_disk_gb}GB [{free_percent}%]\n"
+        f"┖ RAM → {ram}% | Süre → {uptime_str}"
     )
 
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
+
 
 # ---------------- CALLBACK QUERY ----------------
 @Client.on_callback_query()
