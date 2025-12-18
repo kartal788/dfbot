@@ -206,7 +206,9 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
 
     page = (stremio_skip // PAGE_SIZE) + 1
 
- if media_type == "movie":
+page = (stremio_skip // PAGE_SIZE) + 1
+
+if media_type == "movie":
     if id == "movies_2025":
         sort = [("updated_on", "desc")]
         all_movies = await db.sort_movies(sort, page, PAGE_SIZE, genre)
@@ -222,31 +224,31 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
         sort = [("updated_on", "desc")]
         items = (await db.sort_movies(sort, page, PAGE_SIZE, genre)).get("movies", [])
 
-    else:  # series
-        if "top" in id:
-            sort = [("rating", "desc")]
-            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-            items = data.get("tv_shows", [])
-        else:
-            sort = [("updated_on", "desc")]
-            data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
-            items = data.get("tv_shows", [])
+else:  # series
+    if "top" in id:
+        sort = [("rating", "desc")]
+        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
+        items = data.get("tv_shows", [])
+    else:
+        sort = [("updated_on", "desc")]
+        data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
+        items = data.get("tv_shows", [])
 
-        # --- Dizi released sıralaması ---
-        if "released" in id:
-            def get_latest_episode_release(series):
-                latest_date = datetime.min.replace(tzinfo=timezone.utc)
-                for season in series.get("seasons", []):
-                    for ep in season.get("episodes", []):
-                        try:
-                            ep_date = datetime.fromisoformat(ep["released"].replace("Z", "+00:00"))
-                            if ep_date > latest_date:
-                                latest_date = ep_date
-                        except Exception:
-                            continue
-                return latest_date
+    # --- Dizi released sıralaması ---
+    if "released" in id:
+        def get_latest_episode_release(series):
+            latest_date = datetime.min.replace(tzinfo=timezone.utc)
+            for season in series.get("seasons", []):
+                for ep in season.get("episodes", []):
+                    try:
+                        ep_date = datetime.fromisoformat(ep["released"].replace("Z", "+00:00"))
+                        if ep_date > latest_date:
+                            latest_date = ep_date
+                    except Exception:
+                        continue
+            return latest_date
 
-            items.sort(key=get_latest_episode_release, reverse=True)
+        items.sort(key=get_latest_episode_release, reverse=True)
 
     return {"metas": [convert_to_stremio_meta(i) for i in items]}
 
