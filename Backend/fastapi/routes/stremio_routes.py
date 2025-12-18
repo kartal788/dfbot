@@ -232,14 +232,18 @@ async def catalog(media_type: str, id: str, extra: Optional[str] = None):
             data = await db.sort_tv_shows(sort, page, PAGE_SIZE, genre)
             items = data.get("tv_shows", [])
 
-        # --- Dizi released sıralaması ---
+        # --- Dizi released sıralaması (en son yayınlanan bölüme göre) ---
         if "released" in id:
+            from dateutil.parser import parse as parse_date
             def get_latest_episode_release(series):
                 latest_date = datetime.min.replace(tzinfo=timezone.utc)
                 for season in series.get("seasons", []):
                     for ep in season.get("episodes", []):
+                        released_str = ep.get("released")
+                        if not released_str:
+                            continue
                         try:
-                            ep_date = datetime.fromisoformat(ep["released"].replace("Z", "+00:00"))
+                            ep_date = parse_date(released_str)
                             if ep_date > latest_date:
                                 latest_date = ep_date
                         except Exception:
