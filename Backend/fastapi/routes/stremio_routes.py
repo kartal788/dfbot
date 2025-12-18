@@ -147,28 +147,28 @@ async def manifest():
             {
                 "type": "movie",
                 "id": "latest_movies",
-                "name": "Latest",
+                "name": "Yeni Eklenen",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             },
             {
                 "type": "movie",
                 "id": "top_movies",
-                "name": "Popular",
+                "name": "Popüler",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             },
             {
                 "type": "series",
                 "id": "latest_series",
-                "name": "Latest",
+                "name": "Yeni Eklenen",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             },
             {
                 "type": "series",
                 "id": "top_series",
-                "name": "Popular",
+                "name": "Popüler",
                 "extra": [{"name": "genre", "options": GENRES}, {"name": "skip"}],
                 "extraSupported": ["genre", "skip"]
             }
