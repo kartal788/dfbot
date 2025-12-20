@@ -239,7 +239,7 @@ async def cevir(client: Client, message: Message):
     total_duration = int(time.time() - start_time)
     h, rem = divmod(total_duration, 3600)
     m, s = divmod(rem, 60)
-    duration_str = f"{h}h{m}m{s}s"
+    duration_str = f"{h}s{m}d{s}s"
 
     cpu = psutil.cpu_percent(interval=1)
     ram = psutil.virtual_memory().percent
