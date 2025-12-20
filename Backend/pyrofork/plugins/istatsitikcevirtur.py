@@ -182,7 +182,6 @@ async def cevir(client: Client, message: Message):
                         if c["type"] == "film":
                             translated_movies += 1
                         else:
-                            # Dizi bölümleri sayısını ekleyelim
                             seasons = upd.get("seasons", [])
                             ep_count = sum(len(s.get("episodes", [])) for s in seasons)
                             translated_episodes += ep_count
@@ -193,7 +192,11 @@ async def cevir(client: Client, message: Message):
                 c["errors_list"].extend(errors)
                 idx += len(batch_ids)
 
-                # İlerleme mesajı
+                # ---------------- CPU / RAM ----------------
+                cpu = psutil.cpu_percent(interval=None)
+                ram = psutil.virtual_memory().percent
+
+                # ---------------- SÜRE HESAPLAMA ----------------
                 elapsed = int(time.time() - start_time)
                 h, rem = divmod(elapsed, 3600)
                 m, s = divmod(rem, 60)
@@ -219,7 +222,9 @@ async def cevir(client: Client, message: Message):
                                 f"Kalan: Film {movies_to_translate - translated_movies} | Bölüm {episodes_to_translate - translated_episodes}\n"
                                 f"Hatalı: {error_count}\n"
                                 f"{progress_bar(translated_movies + translated_episodes, total_to_translate)}\n\n"
-                                f"Süre: `{elapsed_str}` (`{eta_str}`)"
+                                f"Süre: `{elapsed_str}` (`{eta_str}`)\n\n"
+                                f"┟ CPU → {cpu}%\n"
+                                f"┖ RAM → {ram}%"
                             ),
                             parse_mode=enums.ParseMode.MARKDOWN,
                             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ İptal Et", callback_data="stop")]]),
@@ -236,6 +241,9 @@ async def cevir(client: Client, message: Message):
     m, s = divmod(rem, 60)
     duration_str = f"{h}h{m}m{s}s"
 
+    cpu = psutil.cpu_percent(interval=1)
+    ram = psutil.virtual_memory().percent
+
     await start_msg.edit_text(
         (
             "📊 **Genel Özet**\n\n"
@@ -243,7 +251,8 @@ async def cevir(client: Client, message: Message):
             f"Çevrilen: Film {translated_movies} | Bölüm {translated_episodes}\n"
             f"Kalan: Film {movies_to_translate - translated_movies} | Bölüm {episodes_to_translate - translated_episodes}\n"
             f"Hatalı: {error_count}\n"
-            f"Süre: {duration_str}"
+            f"Süre: {duration_str}\n\n"
+            f"CPU: {cpu}% | RAM: {ram}%"
         ),
         parse_mode=enums.ParseMode.MARKDOWN
     )
