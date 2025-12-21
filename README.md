@@ -428,7 +428,7 @@ sudo apt install caddy
 ✅ Your API will now be available securely at:
 ➡️ `https://your-domain.com`
 
-# 📺 https yapma
+# 📺 Caddy çalışmazsa https yapma
 1) certbot kur.
 ```bash
 sudo apt update
