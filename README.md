@@ -434,15 +434,15 @@ sudo apt install caddy
 sudo apt update
 sudo apt install certbot python3-certbot-nginx -y
 ```
-2) duckdnsli kodu terminale yapıştır.
+2) Duckdnsli kodu terminale yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
-sudo nano /etc/nginx/sites-available/siteaderim.duckdns.org
+sudo nano /etc/nginx/sites-available/siteadresim.duckdns.org
 ```
-3) kodu yapıştır
+3) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
 server {
     listen 80;
-    server_name siteaderim.duckdns.org;
+    server_name siteadresim.duckdns.org;
 
     location / {
         proxy_pass http://localhost:8000;
@@ -452,28 +452,28 @@ server {
     }
 }
 ```
-4) Kodu yapıştır.
+4) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
-sudo ln -s /etc/nginx/sites-available/siteaderim.duckdns.org /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/siteadresim.duckdns.org /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl restart nginx
 ```
-5) Kodu yapıştır.
+5) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
-sudo certbot --nginx -d siteaderim.duckdns.org
+sudo certbot --nginx -d siteadresim.duckdns.org
 ```
-6) Kodu yapıştır.
+6) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
-sudo nano /etc/nginx/sites-available/siteaderim.duckdns.org
+sudo nano /etc/nginx/sites-available/siteadresim.duckdns.org
 ```
-7) Kodu yapıştır.
+7) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
 server {
     listen 8443 ssl;
-    server_name siteaderim.duckdns.org;
+    server_name siteadresim.duckdns.org;
 
-    ssl_certificate /etc/letsencrypt/live/siteaderim.duckdns.org/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/siteaderim.duckdns.org/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/siteadresim.duckdns.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/siteadresim.duckdns.org/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
@@ -485,7 +485,7 @@ server {
     }
 }
 ```
-7) Kodu yapıştır.
+7) Kodu yapıştır. (siteadresim.duckdns.org yerine kendi adresini yaz)
 ```bash
 sudo nginx -t
 sudo systemctl restart nginx
