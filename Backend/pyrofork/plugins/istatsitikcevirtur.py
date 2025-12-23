@@ -507,13 +507,19 @@ async def istatistik(client: Client, message: Message):
     free_disk_gb = round(disk.free / (1024**3), 2)
     free_percent = disk.percent
 
-    # -------- BOT UPTIME (SUNUCU DEĞİL) --------
+    # -------- BOT UPTIME + YENİ GÖSTERİM KURALLARI --------
     uptime_seconds = int(time.time() - bot_start_time)
     days, rem = divmod(uptime_seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, seconds = divmod(rem, 60)
-    uptime_str = f"{days}d{hours}s{minutes}d{seconds}s"
-    # ------------------------------------------
+
+    if days >= 1:
+        uptime_str = f"{days}d{hours}s{minutes}d{seconds}s"
+    elif hours >= 1:
+        uptime_str = f"{hours}s{minutes}d{seconds}s"
+    else:
+        uptime_str = f"{minutes}d{seconds}s"
+    # -----------------------------------------------------
 
     stats = db.command("dbstats")
     storage_mb = round(stats.get("storageSize", 0) / (1024 * 1024), 2)
