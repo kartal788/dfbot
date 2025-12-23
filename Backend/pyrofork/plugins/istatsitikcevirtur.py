@@ -447,6 +447,7 @@ async def platform_sil(client: Client, message: Message):
     await start_msg.edit_text(f"✅ Platform kayıtları silindi.\nToplam değiştirilen kayıt: {total_fixed}")
 
 # ---------------- /ISTATISTIK ----------------
+# ---------------- /ISTATISTIK ----------------
 @Client.on_message(filters.command("istatistik") & filters.private & filters.user(OWNER_ID))
 async def istatistik(client: Client, message: Message):
     total_movies = movie_col.count_documents({})
@@ -507,13 +508,13 @@ async def istatistik(client: Client, message: Message):
     free_disk_gb = round(disk.free / (1024**3), 2)
     free_percent = disk.percent
 
-    # -------- DÜZELTİLEN SÜRE HESABI --------
-    uptime_seconds = int(time.time() - psutil.boot_time())
+    # -------- BOT UPTIME (SUNUCU DEĞİL) --------
+    uptime_seconds = int(time.time() - bot_start_time)
     days, rem = divmod(uptime_seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, seconds = divmod(rem, 60)
     uptime_str = f"{days}d{hours}s{minutes}d{seconds}s"
-    # ---------------------------------------
+    # ------------------------------------------
 
     stats = db.command("dbstats")
     storage_mb = round(stats.get("storageSize", 0) / (1024 * 1024), 2)
