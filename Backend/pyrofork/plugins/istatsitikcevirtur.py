@@ -452,7 +452,6 @@ async def istatistik(client: Client, message: Message):
     total_movies = movie_col.count_documents({})
     total_series = series_col.count_documents({})
 
-    # Link ve kalite bazlı istatistikler
     def count_links_qualities(collection, is_series=False):
         link_set = set()
         telegram_set = set()
@@ -491,7 +490,6 @@ async def istatistik(client: Client, message: Message):
     movie_link, movie_tg, movie_quality_counts = count_links_qualities(movie_col)
     series_link, series_tg, series_quality_counts = count_links_qualities(series_col, is_series=True)
 
-    # Kalite sıralama fonksiyonu
     def format_quality_stats(q_dict):
         order = ["2160p", "1920p", "1440p", "1080p", "720p", "576p", "480p"]
         sorted_items = sorted(
@@ -503,31 +501,41 @@ async def istatistik(client: Client, message: Message):
             for q, c in sorted_items
         )
 
-    # Depolama ve sistem durumu
     cpu = psutil.cpu_percent(interval=1)
     ram = psutil.virtual_memory().percent
     disk = psutil.disk_usage("/")
     free_disk_gb = round(disk.free / (1024**3), 2)
     free_percent = disk.percent
-    uptime_seconds = time.time() - psutil.boot_time()
-    h, rem = divmod(int(uptime_seconds), 3600)
-    m, s = divmod(rem, 60)
-    uptime_str = f"{h}s{m}d{s}s"
+
+    # -------- BOT UPTIME + YENİ GÖSTERİM KURALLARI --------
+    uptime_seconds = int(time.time() - bot_start_time)
+    days, rem = divmod(uptime_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+
+    if days >= 1:
+        uptime_str = f"{days}g{hours}s{minutes}d{seconds}s"
+    elif hours >= 1:
+        uptime_str = f"{hours}s{minutes}d{seconds}s"
+    else:
+        uptime_str = f"{minutes}d{seconds}s"
+    # -----------------------------------------------------
 
     stats = db.command("dbstats")
-    storage_mb = round(stats.get("storageSize",0)/(1024*1024),2)
-    storage_percent = round((storage_mb/512)*100,1)
+    storage_mb = round(stats.get("storageSize", 0) / (1024 * 1024), 2)
+    storage_percent = round((storage_mb / 512) * 100, 1)
 
-    # Tür dağılımı
-    genre_stats = defaultdict(lambda: {"film":0, "dizi":0})
-    for d in movie_col.aggregate([{"$unwind":"$genres"},{"$group":{"_id":"$genres","count":{"$sum":1}}}]):
+    genre_stats = defaultdict(lambda: {"film": 0, "dizi": 0})
+    for d in movie_col.aggregate([{"$unwind": "$genres"}, {"$group": {"_id": "$genres", "count": {"$sum": 1}}}]):
         genre_stats[d["_id"]]["film"] = d["count"]
-    for d in series_col.aggregate([{"$unwind":"$genres"},{"$group":{"_id":"$genres","count":{"$sum":1}}}]):
+    for d in series_col.aggregate([{"$unwind": "$genres"}, {"$group": {"_id": "$genres", "count": {"$sum": 1}}}]):
         genre_stats[d["_id"]]["dizi"] = d["count"]
-    genre_text = "\n".join(f"{g:<14} | Film: {c['film']:<4} | Dizi: {c['dizi']:<4}" 
-                           for g, c in sorted(genre_stats.items()))
 
-    # Mesaj metni
+    genre_text = "\n".join(
+        f"{g:<14} | Film: {c['film']:<4} | Dizi: {c['dizi']:<4}"
+        for g, c in sorted(genre_stats.items())
+    )
+
     text = (
         f"⌬ <b>İstatistik</b>\n\n"
         f"┠ Filmler : {total_movies}\n"
@@ -545,7 +553,6 @@ async def istatistik(client: Client, message: Message):
     )
 
     await message.reply_text(text, parse_mode=enums.ParseMode.HTML)
-
 
 # ---------------- CALLBACK QUERY ----------------
 @Client.on_callback_query()
