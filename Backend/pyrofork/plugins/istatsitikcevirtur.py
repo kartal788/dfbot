@@ -514,7 +514,7 @@ async def istatistik(client: Client, message: Message):
     minutes, seconds = divmod(rem, 60)
 
     if days >= 1:
-        uptime_str = f"{days}d{hours}s{minutes}d{seconds}s"
+        uptime_str = f"{days}g{hours}s{minutes}d{seconds}s"
     elif hours >= 1:
         uptime_str = f"{hours}s{minutes}d{seconds}s"
     else:
