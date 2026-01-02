@@ -160,7 +160,7 @@ async def gizli_komutlar(client, message: Message):
     await message.reply_text(
         "/pixeldrain 📊 Pixeldrain istatistiklerini gösterir.\n"
         "/pixeldrainsil 🗑️ Pixeldrain videolarını siler.\n"
-        "/cevir Açıklamaları Türkçeye çevirir.\n"
+        "/cevir 🇹🇷 Açıklamaları Türkçeye çevirir.\n"
         "/platformekle ➕ Platform ekler.\n"
         "/platformsil ➖ Platform siler.\n"
         "/linklerisil 🔗 Link içeren videoları siler.\n"
