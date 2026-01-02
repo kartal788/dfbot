@@ -77,10 +77,7 @@ async def ekle(client: Client, message: Message):
 
     if not lines:
         return await message.reply_text(
-            "Kullanım:\n"
-            "/ekle link\n"
-            "/ekle link dosyaadı.mkv\n"
-            "/ekle link dosyaadı.mkv tmdb_id"
+            "Kullanım:\n/ekle link\nveya\n/ekle link dosya adı"
         )
 
     status = await message.reply_text("📥 Dizi/film ekleniyor...")
@@ -92,44 +89,35 @@ async def ekle(client: Client, message: Message):
     added_series = []
 
     for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        parts = line.split(maxsplit=1)
+        link = parts[0]
+        extra_info = parts[1] if len(parts) > 1 else None
+
         try:
-            line = line.strip()
-            if not line:
-                continue
-
-            parts = line.split()
-
-            link = parts[0]
-            filename = None
-            forced_tmdb_id = None
-
-            if len(parts) >= 2:
-                filename = parts[1]
-
-            if len(parts) >= 3 and parts[2].isdigit():
-                forced_tmdb_id = int(parts[2])
-
             api_link = pixeldrain_to_api(link) if "pixeldrain.com" in link else link
 
             try:
                 size = await filesize(api_link)
                 cd_filename = await filename_from_url(api_link)
-                meta_filename = filename or cd_filename or link.split("/")[-1]
+                meta_filename = extra_info or cd_filename or link.split("/")[-1]
             except:
                 size = "YOK"
-                meta_filename = filename or link.split("/")[-1]
+                meta_filename = extra_info or link.split("/")[-1]
 
             meta = await metadata(
                 filename=meta_filename,
                 channel=message.chat.id,
-                msg_id=message.id,
-                tmdb_id=forced_tmdb_id
+                msg_id=message.id
             )
 
             if not meta:
                 meta = {
                     "media_type": "movie",
-                    "tmdb_id": forced_tmdb_id,
+                    "tmdb_id": None,
                     "imdb_id": None,
                     "title": meta_filename,
                     "genres": [],
@@ -150,9 +138,6 @@ async def ekle(client: Client, message: Message):
                     "quality": "Unknown"
                 }
 
-            if forced_tmdb_id:
-                meta["tmdb_id"] = forced_tmdb_id
-
             telegram_obj = {
                 "quality": meta.get("quality", "Unknown"),
                 "id": api_link,
@@ -160,11 +145,9 @@ async def ekle(client: Client, message: Message):
                 "size": size
             }
 
-            # ---------------- MOVIE ----------------
+            # ----------------- MOVIE -----------------
             if meta["media_type"] == "movie":
-                query = {"tmdb_id": meta["tmdb_id"]} if meta["tmdb_id"] else {"telegram.id": api_link}
-                doc = await movie_col.find_one(query)
-
+                doc = await movie_col.find_one({"tmdb_id": meta["tmdb_id"]})
                 if not doc:
                     doc = {
                         "tmdb_id": meta["tmdb_id"],
@@ -181,24 +164,21 @@ async def ekle(client: Client, message: Message):
                         "cast": meta["cast"],
                         "runtime": meta["runtime"],
                         "media_type": "movie",
-                        "updated_on": datetime.utcnow(),
+                        "updated_on": str(datetime.utcnow()),
                         "telegram": [telegram_obj]
                     }
                     await movie_col.insert_one(doc)
                 else:
-                    if not any(t["id"] == telegram_obj["id"] for t in doc["telegram"]):
-                        doc["telegram"].append(telegram_obj)
-                        doc["updated_on"] = datetime.utcnow()
-                        await movie_col.replace_one({"_id": doc["_id"]}, doc)
-
+                    # Aynı quality veya id farketmeksizin her zaman ekle
+                    doc["telegram"].append(telegram_obj)
+                    doc["updated_on"] = str(datetime.utcnow())
+                    await movie_col.replace_one({"_id": doc["_id"]}, doc)
                 movie_count += 1
                 added_movies.append(meta["title"])
 
-            # ---------------- TV ----------------
+            # ----------------- TV -----------------
             else:
-                query = {"tmdb_id": meta["tmdb_id"]} if meta["tmdb_id"] else {"seasons.episodes.telegram.id": api_link}
-                doc = await series_col.find_one(query)
-
+                doc = await series_col.find_one({"tmdb_id": meta["tmdb_id"]})
                 episode_obj = {
                     "episode_number": meta["episode_number"],
                     "title": meta["episode_title"],
@@ -207,7 +187,6 @@ async def ekle(client: Client, message: Message):
                     "released": meta["episode_released"],
                     "telegram": [telegram_obj]
                 }
-
                 if not doc:
                     doc = {
                         "tmdb_id": meta["tmdb_id"],
@@ -224,7 +203,7 @@ async def ekle(client: Client, message: Message):
                         "cast": meta["cast"],
                         "runtime": meta["runtime"],
                         "media_type": "tv",
-                        "updated_on": datetime.utcnow(),
+                        "updated_on": str(datetime.utcnow()),
                         "seasons": [{
                             "season_number": meta["season_number"],
                             "episodes": [episode_obj]
@@ -232,32 +211,20 @@ async def ekle(client: Client, message: Message):
                     }
                     await series_col.insert_one(doc)
                 else:
-                    season = next(
-                        (s for s in doc["seasons"] if s["season_number"] == meta["season_number"]),
-                        None
-                    )
-
+                    season = next((s for s in doc["seasons"] if s["season_number"] == meta["season_number"]), None)
                     if not season:
-                        season = {
-                            "season_number": meta["season_number"],
-                            "episodes": []
-                        }
+                        season = {"season_number": meta["season_number"], "episodes": []}
                         doc["seasons"].append(season)
 
-                    ep = next(
-                        (e for e in season["episodes"] if e["episode_number"] == meta["episode_number"]),
-                        None
-                    )
-
+                    ep = next((e for e in season["episodes"] if e["episode_number"] == meta["episode_number"]), None)
                     if not ep:
                         season["episodes"].append(episode_obj)
                     else:
-                        if not any(t["id"] == telegram_obj["id"] for t in ep["telegram"]):
-                            ep["telegram"].append(telegram_obj)
+                        # Aynı bölüm için her zaman yeni telegram objesi ekle
+                        ep["telegram"].append(telegram_obj)
 
-                    doc["updated_on"] = datetime.utcnow()
+                    doc["updated_on"] = str(datetime.utcnow())
                     await series_col.replace_one({"_id": doc["_id"]}, doc)
-
                 series_count += 1
                 added_series.append(meta["title"])
 
@@ -265,25 +232,16 @@ async def ekle(client: Client, message: Message):
             LOGGER.exception(e)
             failed.append(line)
 
-    # ---------------- SONUÇ ----------------
+    # ----------------- Mesaj formatı -----------------
     if len(added_movies) + len(added_series) > 15:
-        result_text = (
-            "✅ İşlem tamamlandı\n\n"
-            f"🎬 Film: {movie_count}\n"
-            f"📺 Dizi: {series_count}\n"
-            f"❌ Hatalı: {len(failed)}"
-        )
+        result_text = f"✅ İşlem tamamlandı\n\n🎬 Film: {movie_count}\n📺 Dizi: {series_count}\n❌ Hatalı: {len(failed)}"
     else:
         movies_text = "\n".join(f"🎬 {name}" for name in added_movies)
         series_text = "\n".join(f"📺 {name}" for name in added_series)
-        result_text = (
-            "✅ İşlem tamamlandı\n\n"
-            f"{movies_text}\n{series_text}\n"
-            f"❌ Hatalı: {len(failed)}"
-        )
+        result_text = f"✅ İşlem tamamlandı\n\n{movies_text}\n{series_text}\n❌ Hatalı: {len(failed)}"
 
     await status.edit_text(result_text)
-
+    
 # ----------------- /SİL -----------------
 awaiting_confirmation = {}
 
