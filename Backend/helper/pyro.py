@@ -154,6 +154,7 @@ BotCommand("filmsil", "🎬 Film siler."),
 BotCommand("vindir", "💾 Veritabanını indirir."),
 BotCommand("log", "📄 Günlük dosyasını gönderir."),
 BotCommand("set", "🎬 IMDb meta verilerini elle ekler."),
+BotCommand("gizlikomutlar", "🔐 Gizli komutları gösterir."),
 BotCommand("restart", "♻️ Botu yeniden başlatır.")
 ]
 
