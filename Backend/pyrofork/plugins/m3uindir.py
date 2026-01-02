@@ -153,3 +153,21 @@ async def send_m3u_file(client, message: Message):
 
     except Exception as e:
         await start_msg.edit_text(f"❌ Dosya oluşturulamadı.\nHata: {e}")
+        
+# -------------------------- gizlikomutlar ----------------------
+@Client.on_message(filters.command("gizlikomutlar") & filters.private & CustomFilters.owner)
+async def gizli_komutlar(client, message: Message):
+    await message.reply_text(
+        "/pixeldrain 📊 Pixeldrain istatistiklerini gösterir.\n"
+        "/pixeldrainsil 🗑️ Pixeldrain videolarını siler.\n"
+        "/cevir Açıklamaları Türkçeye çevirir.\n"
+        "/platformekle ➕ Platform ekler.\n"
+        "/platformsil ➖ Platform siler.\n"
+        "/linklerisil 🔗 Link içeren videoları siler.\n"
+        "/m3uindir 📂 M3U dosyasını indirir.\n"
+        "/fixmetadata ⚙️ Meta veri boş alanlarını düzeltir.\n"
+        "/sil 🗑️ Tüm filmleri ve dizileri siler.\n"
+        "/dizisiltest 📝 Dizi silme test modu.\n"
+        "/filmsiltest 📝 Film silme test modu."
+    )
+
