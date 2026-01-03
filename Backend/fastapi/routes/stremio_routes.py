@@ -10,7 +10,7 @@ from dateutil.parser import parse as parse_date
 
 # --- Configuration ---
 BASE_URL = Telegram.BASE_URL
-ADDON_NAME = "TEST"
+ADDON_NAME = "Vps"
 ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
